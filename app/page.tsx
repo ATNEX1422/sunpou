@@ -9,8 +9,6 @@ const FloorPlanEditor = () => {
   const [isPlacing, setIsPlacing] = useState<boolean>(false);
   const [dimMode, setDimMode] = useState<'W' | 'W_D' | 'W_H' | 'W_D_H'>('W');
 
-  const [copiedObject, setCopiedObject] = useState<any>(null);
-
   // ★共通ヘルパー：【左揃えベース】で文字数に応じて右側へ美しく自動整列させるロジック
   const updateCombinedTextPosition = (target: fabric.Group, parts: any) => {
     if (!parts || !parts.textElements) return;
@@ -541,93 +539,6 @@ const FloorPlanEditor = () => {
     reader.readAsDataURL(file);
   };
 
-  // ★追加：コピー機能
-  const copySelected = () => {
-    if (!canvas) return;
-    const activeObject = canvas.getActiveObject();
-    if (!activeObject) return;
-
-    // 寸法線本体（Group）が選択されているか、またはテキスト側が選択されている場合
-    let targetGroup = activeObject;
-    if ((activeObject as any)._parentGroup) {
-      targetGroup = (activeObject as any)._parentGroup;
-    }
-
-    if (targetGroup.type === 'group') {
-      // 参照が混ざらないように、オブジェクトのデータをしっかり記憶する
-      setCopiedObject(targetGroup);
-    }
-  };
-
-  // ★追加：ペースト機能
-  const pasteCopied = async () => {
-    if (!canvas || !copiedObject) return;
-
-    // 1. 寸法線本体（矢印グループ）を複製
-    const clonedGroup = await copiedObject.clone();
-    
-    // 少し右下にずらして配置（コピペしたことが分かりやすいように）
-    clonedGroup.set({
-      left: copiedObject.left + 20,
-      top: copiedObject.top + 20,
-      selectable: true,
-      evented: true
-    });
-
-    // 2. 新しいテキストパーツ群（W, D, H）を複製して紐付ける
-    const originalParts = copiedObject._dimensionParts;
-    const clonedParts: any = {};
-    const newTextElements: fabric.Object[] = [];
-
-    // 元のグループ内の線や矢印の参照を再構築
-    clonedGroup.getObjects().forEach((obj: any, index: number) => {
-      // 元のオブジェクトと同じ役割のものを紐付け直す
-      const origObjects = copiedObject.getObjects();
-      const origObj = origObjects[index];
-      
-      if (originalParts.wLine === origObj) clonedParts.wLine = obj;
-      if (originalParts.wLeft === origObj) clonedParts.wLeft = obj;
-      if (originalParts.wRight === origObj) clonedParts.wRight = obj;
-      if (originalParts.dLine === origObj) clonedParts.dLine = obj;
-      if (originalParts.dTop === origObj) clonedParts.dTop = obj;
-      if (originalParts.dBottom === origObj) clonedParts.dBottom = obj;
-    });
-
-    // テキスト群の複製
-    for (const textObj of originalParts.textElements) {
-      const clonedText = await textObj.clone();
-      clonedText.set({
-        selectable: false,
-        evented: true,
-        lockMovementX: true,
-        lockMovementY: true
-      });
-      (clonedText as any)._parentGroup = clonedGroup;
-      (clonedText as any)._isNewLine = (textObj as any)._isNewLine;
-      (clonedText as any)._customTopOffset = (textObj as any)._customTopOffset;
-      
-      newTextElements.push(clonedText);
-    }
-
-    clonedParts.textElements = newTextElements;
-    clonedGroup._dimensionParts = clonedParts;
-    clonedGroup._dimMode = copiedObject._dimMode;
-
-    // 3. キャンバスへ追加
-    canvas.add(clonedGroup);
-    newTextElements.forEach(t => canvas.add(t));
-
-    // 位置と連動キー入力の再設定（新規配置と同じ扱いにする）
-    updateCombinedTextPosition(clonedGroup, clonedParts);
-    
-    // 複製したオブジェクトの最初の数字（W）を自動編集モードにする処理を流用
-    const numW = newTextElements.find((t: any) => !t._isNewLine && t.text !== 'W: ' && t.text !== ' / ' && t.text !== 'D: ');
-    
-    // 新規配置と同じ連続入力をセットアップ（既存のロジックに任せるため、再編集可能な状態で選択します）
-    canvas.setActiveObject(clonedGroup);
-    canvas.requestRenderAll();
-  };
-
   return (
     <div className="flex flex-col items-center gap-4 p-8 bg-gray-50 min-h-screen font-sans">
       <div className="flex flex-wrap gap-4 mb-4 items-center bg-white p-4 rounded-xl shadow-md border border-gray-100">
@@ -646,10 +557,6 @@ const FloorPlanEditor = () => {
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
           <button onClick={() => rotateSelected(-90)} className="p-2 hover:bg-white rounded-md transition shadow-sm" title="左90度回転">↺</button>
           <button onClick={() => rotateSelected(90)} className="p-2 hover:bg-white rounded-md transition shadow-sm" title="右90度回転">↻</button>
-        </div>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-          <button onClick={copySelected} className="px-3 py-1.5 hover:bg-white text-xs font-bold rounded-md transition shadow-sm bg-gray-50 text-gray-700 border border-gray-200" title="選択した寸法をコピー">コピー</button>
-          <button onClick={pasteCopied} disabled={!copiedObject} className={`px-3 py-1.5 text-xs font-bold rounded-md transition shadow-sm border ${copiedObject ? 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50' : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'}`} title="コピーした寸法を貼り付け">ペースト</button>
         </div>
         <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
           {['#ef4444', '#3b82f6', '#22c55e', '#000000'].map(c => (
