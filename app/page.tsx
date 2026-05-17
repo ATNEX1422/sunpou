@@ -306,7 +306,7 @@ const createDimensionAtPosition = (
       }
 
 const combinedText = new fabric.IText(combinedTextString, {
-        fontSize: 12,
+        fontSize: 10,
         fontWeight: 'bold',
         fill: color,
         backgroundColor: 'rgba(255, 255, 255, 0.85)',
