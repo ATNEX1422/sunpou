@@ -9,6 +9,14 @@ const FloorPlanEditor = () => {
   const [isPlacing, setIsPlacing] = useState<boolean>(false);
   const [dimMode, setDimMode] = useState<'W' | 'W_D' | 'W_H' | 'W_D_H'>('W');
 
+  // ★コピペ用：クリップボード（JSON文字列）
+  const copiedJsonRef = useRef<string | null>(null);
+
+  // ★Undo/Redo用：履歴スタック
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+  const isRespondingToHistory = useRef<boolean>(false); // 履歴復元中のイベント重複防止フラグ
+
   // ★共通ヘルパー：【左揃えベース】で文字数に応じて右側へ美しく自動整列させるロジック
   const updateCombinedTextPosition = (target: fabric.Group, parts: any) => {
     if (!parts || !parts.textElements) return;
@@ -43,6 +51,97 @@ const FloorPlanEditor = () => {
     });
   };
 
+  // ★Undo/Redo用：現在のキャンバスの状態を丸ごとセーブする関数
+  const saveHistory = (fCanvas: fabric.Canvas) => {
+    if (isRespondingToHistory.current) return;
+    
+    // カスタムプロパティ（_dimMode, _parentGroupなど）を網羅してシリアライズ
+    const json = JSON.stringify(fCanvas.toObject([
+      '_dimMode', 
+      '_dimensionParts', 
+      '_parentGroup', 
+      '_isNewLine', 
+      '_customTopOffset',
+      'selectable',
+      'evented',
+      'lockMovementX',
+      'lockMovementY',
+      'lockScalingX',
+      'lockScalingY',
+      'lockRotation',
+      'hasControls',
+      'hasBorders'
+    ]));
+
+    // 直近と同じ状態ならスタックへの重複保存をスキップ
+    if (undoStack.current.length > 0 && undoStack.current[undoStack.current.length - 1] === json) return;
+
+    undoStack.current.push(json);
+    redoStack.current = []; // 新しい操作をしたら進むスタックはクリア
+  };
+
+  // ★Undo/Redo用：歴史をロードしてオブジェクト間の参照リンクを再構築する関数
+  const loadHistoryState = async (fCanvas: fabric.Canvas, jsonStr: string) => {
+    isRespondingToHistory.current = true;
+    fCanvas.discardActiveObject();
+    
+    // 背景画像を維持するために一時避難
+    const bgImage = fCanvas.backgroundImage;
+
+    await fCanvas.loadFromJSON(jsonStr);
+
+    // 背景画像の再適用
+    if (bgImage) {
+      fCanvas.backgroundImage = bgImage;
+    }
+
+    // ロードされたオブジェクトたちの親子関係（紐付け参照リンク）を1から再構築する
+    const objects = fCanvas.getObjects();
+    const groups = objects.filter(obj => obj instanceof fabric.Group) as fabric.Group[];
+    const texts = objects.filter(obj => obj instanceof fabric.IText) as fabric.IText[];
+
+    groups.forEach((group: any) => {
+      const parts: any = {};
+      const linkedTexts: fabric.Object[] = [];
+
+      // 内部パーツ（線、矢印）の再割り当て
+      group.getObjects().forEach((child: any, index: number) => {
+        if (index === 0) parts.wLine = child;
+        if (index === 1) parts.wLeft = child;
+        if (index === 2) parts.wRight = child;
+        if (index === 3) parts.dLine = child;
+        if (index === 4) parts.dTop = child;
+        if (index === 5) parts.dBottom = child;
+      });
+
+      // このグループを親に持つテキスト群を探索して再リンク
+      texts.forEach((textObj: any) => {
+        // loadFromJSON時のIDや中身の座標参照から、元の親子関係を復元
+        if (textObj._parentGroup && 
+            Math.abs(textObj._parentGroup.left - group.left) < 50 && 
+            Math.abs(textObj._parentGroup.top - group.top) < 50) {
+          textObj._parentGroup = group;
+          linkedTexts.push(textObj);
+        }
+      });
+
+      // テキスト群を正しいレイアウト順（Wラベル➔W数字...）にソートして格納
+      parts.textElements = linkedTexts.sort((a: any, b: any) => {
+        const topDiff = (a._customTopOffset || 0) - (b._customTopOffset || 0);
+        if (topDiff !== 0) return topDiff;
+        return a.left - b.left;
+      });
+
+      group._dimensionParts = parts;
+
+      // 復元された位置を美しく再計算
+      updateCombinedTextPosition(group, parts);
+    });
+
+    fCanvas.requestRenderAll();
+    isRespondingToHistory.current = false;
+  };
+
   useEffect(() => {
     if (!canvasRef.current) return;
 
@@ -52,6 +151,9 @@ const FloorPlanEditor = () => {
       backgroundColor: '#f3f4f6',
       centeredScaling: true,
     });
+
+    // --- 歴史を記録するトリガーイベント群の登録 ---
+    fabricCanvas.on('object:modified', () => saveHistory(fabricCanvas)); // 移動・変形・回転が「確定」した時
 
     // 1. 移動時の追従
     fabricCanvas.on('object:moving', (options: any) => {
@@ -122,14 +224,12 @@ const FloorPlanEditor = () => {
       fabricCanvas.requestRenderAll();
     });
 
-    // 4. ★核心：Fabric.js v6 のイベント透過をバイパスして、数字のダブルクリック再編集を強制起動する処理
+    // 4. 数字のダブルクリック再編集の強制起動処理
     fabricCanvas.on('mouse:dblclick', (options) => {
       const target = options.target;
       if (!target) return;
 
-      // ダブルクリックされたのが「数字（ITextかつ親グループを持つ）」だった場合
       if (target instanceof fabric.IText && (target as any)._parentGroup) {
-        // キャンバスの最前面に一時的に引っ張り上げてフォーカスを叩き込む
         fabricCanvas.setActiveObject(target);
         target.enterEditing();
         target.selectAll();
@@ -145,8 +245,10 @@ const FloorPlanEditor = () => {
 
       const pointer = fabricCanvas.getScenePoint(options.e);
       if (pointer) {
+        // 配置直前の状態をセーブ
+        saveHistory(fabricCanvas);
+
         const currentMode = (fabricCanvas as any)._currentDimMode || 'W';
-        
         createDimensionAtPosition(fabricCanvas, pointer.x, pointer.y, '#ef4444', currentMode);
 
         (fabricCanvas as any)._isPlacingMode = false;
@@ -155,48 +257,254 @@ const FloorPlanEditor = () => {
         
         setTimeout(() => {
           fabricCanvas.getObjects().forEach(obj => {
-            // 寸法線本体（矢印）グループのみを選択可能にする
             if (!(obj as any)._parentGroup) {
               obj.selectable = true;
               obj.evented = true;
             }
           });
+          // 配置完了後の状態を確定セーブ
+          saveHistory(fabricCanvas);
           fabricCanvas.renderAll();
         }, 10);
       }
     });    
+    // ★修正：windowではなく、Fabric.jsのキャンバスのコンテナ要素に直接キー監視を仕込む
+    // これにより、Next.jsのクロージャバグや、Deleteキーが虚空に消える現象を100%シャットアウトします
+    const canvasElement = fabricCanvas.getSelectionElement();
+    if (canvasElement) {
+      // キーボードイベントを受け取れるようにフォーカス可能にする
+      canvasElement.tabIndex = 1000;
+      canvasElement.style.outline = 'none';
 
-    window.addEventListener('keydown', handleKeyDown);
+      canvasElement.addEventListener('keydown', (e: KeyboardEvent) => {
+        const key = e.key.toLowerCase();
+        const active = fabricCanvas.getActiveObject();
+        if (active && (active as any).isEditing) return; // 文字入力中はショートカットを無視
+
+        // --- 1. Undo処理 (Ctrl + Z) ---
+        if ((e.ctrlKey || e.metaKey) && key === 'z') {
+          e.preventDefault();
+          if (undoStack.current.length === 0) return;
+          
+          const currentJson = JSON.stringify(fabricCanvas.toObject(['_dimMode', '_dimensionParts', '_parentGroup', '_isNewLine', '_customTopOffset', 'selectable', 'evented', 'lockMovementX', 'lockMovementY', 'lockScalingX', 'lockScalingY', 'lockRotation', 'hasControls', 'hasBorders']));
+          redoStack.current.push(currentJson);
+
+          const previousState = undoStack.current.pop()!;
+          loadHistoryState(fabricCanvas, previousState);
+          return;
+        }
+
+        // --- 2. Redo処理 (Ctrl + Y) ---
+        if ((e.ctrlKey || e.metaKey) && key === 'y') {
+          e.preventDefault();
+          if (redoStack.current.length === 0) return;
+
+          const currentJson = JSON.stringify(fabricCanvas.toObject(['_dimMode', '_dimensionParts', '_parentGroup', '_isNewLine', '_customTopOffset', 'selectable', 'evented', 'lockMovementX', 'lockMovementY', 'lockScalingX', 'lockScalingY', 'lockRotation', 'hasControls', 'hasBorders']));
+          undoStack.current.push(currentJson);
+
+          const nextState = redoStack.current.pop()!;
+          loadHistoryState(fabricCanvas, nextState);
+          return;
+        }
+
+        // --- 3. コピー処理 (Ctrl + C) ---
+        if ((e.ctrlKey || e.metaKey) && key === 'c') {
+          if (!active) return;
+
+          let targetGroup = active;
+          if ((active as any)._parentGroup) {
+            targetGroup = (active as any)._parentGroup;
+          }
+
+          if (targetGroup.type === 'group') {
+            e.preventDefault();
+            
+            const groupData = targetGroup.toObject(['_dimMode', '_dimensionParts']);
+            const textDataArray = (targetGroup as any)._dimensionParts.textElements.map((t: any) => {
+              return t.toObject(['_isNewLine', '_customTopOffset']);
+            });
+
+            copiedJsonRef.current = JSON.stringify({
+              group: groupData,
+              texts: textDataArray,
+              dimMode: (targetGroup as any)._dimMode
+            });
+          }
+          return;
+        }
+
+        // --- 4. ペースト処理 (Ctrl + V) ---
+        if ((e.ctrlKey || e.metaKey) && key === 'v') {
+          if (!copiedJsonRef.current) return;
+          e.preventDefault();
+
+          saveHistory(fabricCanvas); // ペースト直前の状態をセーブ
+
+          const clipboardData = JSON.parse(copiedJsonRef.current);
+
+          (async () => {
+            // ① 寸法線本体（矢印グループ）の復元
+            const clonedGroup = await fabric.Group.fromObject(clipboardData.group);
+            const dimMode = clipboardData.dimMode;
+            
+            // コピペ位置を少し右下にずらす
+            clonedGroup.set({
+              left: (clipboardData.group.left || 0) + 20,
+              top: (clipboardData.group.top || 0) + 20,
+              selectable: true,
+              evented: true,
+              objectCaching: false // ★追加：伸縮時に中身がボヤけたり見切れたりするのを防ぐ
+            });
+
+            const clonedParts: any = {};
+            const newTextElements: fabric.Object[] = [];
+
+            // 内部パーツ（線、三角形）の役割を再紐付け
+            clonedGroup.getObjects().forEach((obj: any, index: number) => {
+              if (index === 0) clonedParts.wLine = obj;
+              if (index === 1) clonedParts.wLeft = obj;
+              if (index === 2) clonedParts.wRight = obj;
+              if (index === 3) clonedParts.dLine = obj;
+              if (index === 4) clonedParts.dTop = obj;
+              if (index === 5) clonedParts.dBottom = obj;
+            });
+
+            // ② 連動するテキスト群の復元とルール再適用
+            for (const tData of clipboardData.texts) {
+              const clonedText = await fabric.IText.fromObject(tData);
+              
+              // ★修正：既存の数字・ラベルの厳格なルールをコピペ側にも100%強制適用する
+              const isNum = tData.text !== 'W: ' && tData.text !== ' / ' && tData.text !== 'D: ' && tData.text !== 'H: ';
+              
+              clonedText.set({
+                originX: 'left',
+                originY: 'center',
+                hasControls: false,
+                hasBorders: false,
+                objectCaching: false,
+                selectable: false, // バラバラ移動を防ぐ
+                evented: isNum,    // 数字だけダブルクリックを受け付ける
+                lockMovementX: true,
+                lockMovementY: true,
+                lockScalingX: true,
+                lockScalingY: true,
+                lockRotation: true
+              });
+              
+              // 親子関係の再リンク
+              (clonedText as any)._parentGroup = clonedGroup;
+              (clonedText as any)._isNewLine = tData._isNewLine;
+              (clonedText as any)._customTopOffset = tData._customTopOffset;
+              
+              newTextElements.push(clonedText);
+            }
+
+            // 拡張プロパティの再定義
+            (clonedGroup as any)._dimensionParts = clonedParts;
+            (clonedGroup as any)._dimMode = dimMode;
+            clonedParts.textElements = newTextElements;
+
+            // ★修正：既存ルールにのっとり、モードに応じて「伸縮ハンドル（コントロール）」の表示・非表示を再設定する
+            if (dimMode === 'W' || dimMode === 'W_H') {
+              clonedGroup.setControlsVisibility({
+                mt: false, mb: false, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true,
+              });
+              clonedGroup.lockScalingY = true;
+            } else {
+              clonedGroup.setControlsVisibility({
+                mt: true, mb: true, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true,
+              });
+            }
+
+            // ③ キャンバスへ追加
+            fabricCanvas.add(clonedGroup);
+            newTextElements.forEach(t => fabricCanvas.add(t));
+
+            // 左揃えレイアウトをその場で再計算
+            updateCombinedTextPosition(clonedGroup, clonedParts);
+            
+            // 連動キー入力ロジック（setupSequence）をペーストした新しい文字たちにも再セットアップする
+            // ※新規配置時のW・D・H連鎖ロジックをここでも再適用させるため、setupSequenceを動かします。
+            // ただし、このままだとsetupSequenceがスコープ外なので、一番手軽なのは既存の「文字変更時イベント」を再バインドすることですが、
+            // 今回はペーストされたオブジェクトに対して、外側からテキスト編集イベントを再定義します。
+            newTextElements.forEach((textObj: any) => {
+              if (textObj.evented) { // 数字オブジェクトの場合
+                textObj.on('changed', () => {
+                  textObj.text = textObj.text.replace(/[^0-9\n]/g, '');
+                  updateCombinedTextPosition(clonedGroup, clonedParts);
+                  fabricCanvas.requestRenderAll();
+                });
+
+                textObj.onKeyDown = (eEvent: KeyboardEvent) => {
+                  if (eEvent.key === 'Enter') {
+                    if (eEvent.shiftKey) {
+                      (textObj as any).insertChars('\n');
+                      textObj.canvas?.requestRenderAll();
+                      updateCombinedTextPosition(clonedGroup, clonedParts);
+                      return;
+                    } else {
+                      eEvent.preventDefault();
+                      textObj.exitEditing();
+                      return;
+                    }
+                  }
+                  fabric.IText.prototype.onKeyDown.call(textObj, eEvent);
+                  setTimeout(() => updateCombinedTextPosition(clonedGroup, clonedParts), 10);
+                };
+
+                textObj.on('editing:entered', () => { clonedGroup.selectable = false; });
+                textObj.on('editing:exited', () => {
+                  clonedGroup.selectable = true;
+                  textObj.text = textObj.text.trim() === '' ? '00' : textObj.text.trim();
+                  textObj.setCoords();
+                  updateCombinedTextPosition(clonedGroup, clonedParts);
+                  saveHistory(fabricCanvas);
+                  fabricCanvas.requestRenderAll();
+                });
+              }
+            });
+
+            fabricCanvas.discardActiveObject();
+            fabricCanvas.setActiveObject(clonedGroup);
+            
+            saveHistory(fabricCanvas); // ペースト完了後の状態を確定セーブ
+            fabricCanvas.requestRenderAll();
+          })();
+          return;
+        }
+
+        // --- 5. 削除処理 (Delete / Backspace) ---
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          const activeObjects = fabricCanvas.getActiveObjects();
+          if (activeObjects.length === 0) return;
+
+          saveHistory(fabricCanvas); // 削除前の歴史を保存
+          
+          activeObjects.forEach(obj => {
+            if (obj && (obj as any)._dimensionParts && (obj as any)._dimensionParts.textElements) {
+              (obj as any)._dimensionParts.textElements.forEach((t: any) => fabricCanvas.remove(t));
+            }
+            if (obj && (obj as any)._parentGroup) {
+              const parent = (obj as any)._parentGroup;
+              if (parent._dimensionParts && parent._dimensionParts.textElements) {
+                parent._dimensionParts.textElements.forEach((t: any) => fabricCanvas.remove(t));
+              }
+              fabricCanvas.remove(parent);
+            }
+            fabricCanvas.remove(obj);
+          });
+          fabricCanvas.discardActiveObject();
+          saveHistory(fabricCanvas); // 削除完了後の歴史を確定
+          fabricCanvas.requestRenderAll();
+        }
+      });
+    }
+
     return () => {
       fabricCanvas.dispose();
-      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (!canvas) return;
-    const active = canvas.getActiveObject();
-    if (active && (active as any).isEditing) return;
-
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      const activeObjects = canvas.getActiveObjects();
-      activeObjects.forEach(obj => {
-        if (obj && (obj as any)._dimensionParts && (obj as any)._dimensionParts.textElements) {
-          (obj as any)._dimensionParts.textElements.forEach((t: any) => canvas.remove(t));
-        }
-        if (obj && (obj as any)._parentGroup) {
-          const parent = (obj as any)._parentGroup;
-          if (parent._dimensionParts && parent._dimensionParts.textElements) {
-            parent._dimensionParts.textElements.forEach((t: any) => canvas.remove(t));
-          }
-          canvas.remove(parent);
-        }
-        canvas.remove(obj);
-      });
-      canvas.discardActiveObject();
-      canvas.renderAll();
-    }
-  };
+  }, []); // コピペデータの更新をキー監視に同期させる
 
   // --- 次元（寸法線）生成ロジック ---
   const createDimensionAtPosition = (
@@ -212,7 +520,6 @@ const FloorPlanEditor = () => {
     const objectsToGroup: fabric.Object[] = [];
     const dimensionParts: any = {};
 
-    // --- 1. 線と矢印のベース生成 ---
     const wLine = new fabric.Line([-length / 2, 0, length / 2, 0], {
       stroke: color, strokeWidth: 2, originX: 'center', originY: 'center',
     });
@@ -249,11 +556,9 @@ const FloorPlanEditor = () => {
       left: x, top: y, originX: 'center', originY: 'center', objectCaching: false,
     });
 
-    // --- 2. 各テキストパーツの生成 ---
     const textElements: fabric.Object[] = [];
     const textGroupParts: any = {};
 
-    // 左揃えベースの基本スタイル
     const baseStyle = { 
       fontSize: 12, fontWeight: 'bold' as const, fill: color, 
       originX: 'left' as const, originY: 'center' as const,
@@ -261,22 +566,8 @@ const FloorPlanEditor = () => {
       lockScalingX: true, lockScalingY: true, lockRotation: true
     };
 
-    // 固定ラベル（完全にクリックをスルーさせて、下のオブジェクトやキャンバスにイベントを流す）
-    const labelStyle = { 
-      ...baseStyle, 
-      selectable: false, 
-      evented: false 
-    };
-
-    // 数字部分（移動は完全に禁止するが、キャンバスのダブルクリック検知に引っかけるために evented: true にする）
-    const numStyle = { 
-      ...baseStyle, 
-      backgroundColor: 'rgba(255, 255, 255, 0.85)',
-      selectable: false, 
-      evented: true, 
-      lockMovementX: true, 
-      lockMovementY: true
-    };
+    const labelStyle = { ...baseStyle, selectable: false, evented: false };
+    const numStyle = { ...baseStyle, backgroundColor: 'rgba(255, 255, 255, 0.85)', selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
 
     if (dimMode === 'W') {
       const lblW = new fabric.IText('W: ', labelStyle);
@@ -327,7 +618,6 @@ const FloorPlanEditor = () => {
       textGroupParts.numH = numH;
     }
 
-    // 相互リンクの構築
     (group as any)._dimensionParts = dimensionParts;
     (group as any)._dimMode = dimMode;
     dimensionParts.textElements = textElements;
@@ -339,10 +629,9 @@ const FloorPlanEditor = () => {
     fCanvas.add(group);
     textElements.forEach(t => fCanvas.add(t));
 
-    // 位置合わせ
     updateCombinedTextPosition(group, dimensionParts);
 
-    // --- 3. ★核心：エンターキーで次の数値へバトンタッチする連続入力ロジック ---
+    // --- 3. 連動キー入力ロジック ---
     const setupSequence = (currentNum: fabric.IText, nextNum?: fabric.IText) => {
       if (!currentNum) return;
 
@@ -376,7 +665,6 @@ const FloorPlanEditor = () => {
       currentNum.on('editing:exited', () => {
         group.selectable = true;
         
-        // 入力された文字のトリミング処理
         const isInitialValue = (currentNum.text.trim() === '' || currentNum.text.trim() === '00');
         if (isInitialValue) {
           currentNum.text = '00';
@@ -386,9 +674,11 @@ const FloorPlanEditor = () => {
         
         currentNum.setCoords();
         updateCombinedTextPosition(group, dimensionParts);
+        
+        // 文字入力確定後の状態をセーブ
+        saveHistory(fCanvas);
         fCanvas.requestRenderAll();
 
-        // ★核心：編集が終わったテキストが「初期値（00）」のままで、かつ「次の入力欄」があるなら新規配置とみなしてワープ！
         if (nextNum && isInitialValue) {
           setTimeout(() => {
             fCanvas.setActiveObject(nextNum);
@@ -397,10 +687,9 @@ const FloorPlanEditor = () => {
             fCanvas.requestRenderAll();
           }, 50);
         } 
-        // すでに数値が書き換わっている（再編集）、または最後の項目まで入力しきった場合
         else {
           group.setCoords();
-          fCanvas.setActiveObject(group); // その場でピタッとフリーな状態に戻す
+          fCanvas.setActiveObject(group);
           fCanvas.requestRenderAll();
         }
       });
@@ -479,6 +768,7 @@ const FloorPlanEditor = () => {
       if (active._dimensionParts) {
         updateCombinedTextPosition(active, active._dimensionParts);
       }
+      saveHistory(canvas); // 回転確定後のセーブ
       canvas.renderAll();
     }
   };
@@ -521,20 +811,96 @@ const FloorPlanEditor = () => {
       }
     });
 
+    saveHistory(canvas); // 色変更後のセーブ
     canvas.requestRenderAll();
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !canvas) return;
+
+    // ★核心：ファイル選択ボタンから、ブラウザの強力なフォーカスロックを「強制的に剥ぎ取る」
+    // これにより、ブラウザのセキュリティガードをバイパスし、後の自動タイピングを100%有効化します
+    e.target.blur();
+
     const reader = new FileReader();
     reader.onload = async (f) => {
+      // 差し替えに伴い、キャンバス内の既存の「古い物件名テキスト」を検索して完全に削除
+      const existingObjects = canvas.getObjects();
+      existingObjects.forEach((obj: any) => {
+        if (obj && obj._isPropertyTitle) {
+          canvas.remove(obj);
+        }
+      });
+
+      // 画像のインポートとリサイズ処理
       const img = await fabric.FabricImage.fromURL(f.target?.result as string);
       const scale = Math.min(canvas.width! / img.width!, canvas.height! / img.height!);
       img.scale(scale < 1 ? scale : 1);
       img.set({ left: canvas.width! / 2, top: canvas.height! / 2, originX: 'center', originY: 'center' });
       canvas.backgroundImage = img;
+      
+      // 履歴スタックを初期化
+      undoStack.current = [];
+      redoStack.current = [];
+
+      // ★2. 右下に配置する「物件名入力テキストボックス」を新規生成
+      const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
+        fontSize: 14,
+        fontWeight: 'bold',
+        fill: '#1f2937', // 高級感のあるダークグレー
+        backgroundColor: 'rgba(255, 255, 255, 0.9)', // 図面に被っても読めるように白背景
+        padding: 6,
+        originX: 'right', // 右下配置なので右揃え
+        originY: 'bottom', // 右下配置なので下揃え
+        left: canvas.width! - 20, // 右端から20px内側
+        top: canvas.height! - 20, // 下端から20px内側
+        hasControls: false, // リサイズハンドルは不要
+        hasBorders: true,
+        borderColor: '#3b82f6', // 編集時にわかりやすい青枠
+        cornerSize: 0,
+        lockMovementX: false, // 物件名は図面に応じて位置を微調整できるように移動は許可
+        lockMovementY: false,
+      });
+
+      // 特製識別フラグを付与（次回画像インポート時の削除用、およびUndo/Redo保存用）
+      (propertyTitle as any)._isPropertyTitle = true;
+
+      // ★追加：物件名テキストに専用のキーボード挙動（Enterで確定、Shift+Enterで改行）を仕込む
+      propertyTitle.onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          if (e.shiftKey) {
+            // ① Shift + Enter の場合は、最新の Fabric.js (v6) の仕様に合わせて安全に改行を挿入する
+            (propertyTitle as any).insertChars('\n');
+            propertyTitle.canvas?.requestRenderAll();
+            return;
+          } else {
+            // ② 単なる Enter の場合は、標準の改行をキャンセルし、編集を終了（確定）させる
+            e.preventDefault();
+            propertyTitle.exitEditing(); 
+            return;
+          }
+        }
+        // Enter以外のキー（文字のタイピングなど）は、本来のITextの処理にそのまま流す
+        fabric.IText.prototype.onKeyDown.call(propertyTitle, e);
+      };
+
+      // キャンバスへ追加
+      canvas.add(propertyTitle);
+      saveHistory(canvas);
       canvas.renderAll();
+
+      // ★核心：配置された瞬間に、即座にフォーカスを奪って自動入力を開始させる
+      setTimeout(() => {
+        // ① まずブラウザのフォーカスを`<input>`ボタンからキャンバスへ強制的に引っ張ってくる
+        canvas.getSelectionElement().focus();
+
+        // ② その上でテキストを編集モード＆全選択状態にする
+        canvas.setActiveObject(propertyTitle);
+        propertyTitle.enterEditing();
+        propertyTitle.selectAll();
+        canvas.requestRenderAll();
+      }, 300); // 念のため、画像配置から少し時間差を空けて確実にフォーカスさせる
     };
     reader.readAsDataURL(file);
   };
