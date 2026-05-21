@@ -17,26 +17,55 @@ const FloorPlanEditor = () => {
   const redoStack = useRef<string[]>([]);
   const isRespondingToHistory = useRef<boolean>(false); // 履歴復元中のイベント重複防止フラグ
 
-  // ★共通ヘルパー：【左揃えベース】で文字数に応じて右側へ美しく自動整列させるロジック
+ // ★共通ヘルパー：文字数に応じて右側へ美しく自動整列させるロジック（モード別位置最適化）
   const updateCombinedTextPosition = (target: fabric.Group, parts: any) => {
     if (!parts || !parts.textElements) return;
 
     const angleRad = (target.angle || 0) * (Math.PI / 180);
-    
-    // 寸法線の右上45度のデフォルト位置を計算
-    const offsetX = (target.width / 2) + 12;
-    const offsetY = -((target.height / 2) + 12);
+    const dimMode = (target as any)._dimMode || 'W';
 
-    // 寸法線の中心からの絶対座標を割り出す
+    // ★修正：寸法線の形状（モード）に合わせて、文字の初期配置（オフセット）を動的に切り替える
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (dimMode === 'W' || dimMode === 'W_H') {
+      // 1. 十字ではない（ただの直線）の場合：寸法線の「真ん中（X=0）の5px真上（Y=少し上）」に配置
+      // ※グループ全体の高さ（height）を考慮して、線の真上にピタッと乗るように調整します
+      offsetX = 0;
+      offsetY = -((target.height / 2) + 12);
+    } else {
+      // 2. 十字（W_D や W_D_H）の場合：中央だと縦線と文字が丸被りするため、従来通り「右上45度」に逃がす
+      offsetX = (target.width / 2) + 12;
+      offsetY = -((target.height / 2) + 12);
+    }
+
+    // 寸法線の中心座標と回転角から、文字を配置すべき絶対座標を計算
     const rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
     const rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
 
+    // ★修正：W や W_H（中央上部配置）のときは、文字の塊全体が「中央揃え」に見えるように、
+    // テキスト全体の総幅をあらかじめ計算して、左端（開始位置）を左側に半分ずらす（センタリング処理）
     let currentLeft = rotatedX;
     const padding = 2; // 文字同士のスキマ
 
+    if (dimMode === 'W' || dimMode === 'W_H') {
+      // 1行目の総幅を簡易計算（W: 00 / D: 00 などの全体幅）
+      let firstLineWidth = 0;
+      parts.textElements.forEach((textObj: fabric.Object) => {
+        if (!(textObj as any)._isNewLine) {
+          firstLineWidth += (textObj.width || 0) + padding;
+        }
+      });
+      // 開始位置を「総幅の半分」だけ左にオフセットすることで、全体が綺麗に中央上に乗る
+      currentLeft = rotatedX - (firstLineWidth / 2);
+    }
+
+    // 各テキストパーツ（ラベル、数字）を順に配置
+    const startX = currentLeft; // 改行時の一時記憶用
     parts.textElements.forEach((textObj: fabric.Object) => {
+      // Hなどの2行目の文字が来たら、X座標の開始位置を左端にリセットする
       if ((textObj as any)._isNewLine) {
-        currentLeft = rotatedX;
+        currentLeft = startX;
       }
 
       textObj.set({
@@ -50,7 +79,7 @@ const FloorPlanEditor = () => {
       currentLeft += (textObj.width || 0) + padding;
     });
   };
-
+  
   // ★Undo/Redo用：現在のキャンバスの状態を丸ごとセーブする関数
   const saveHistory = (fCanvas: fabric.Canvas) => {
     if (isRespondingToHistory.current) return;
@@ -819,13 +848,9 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !canvas) return;
 
-    // ★核心：ファイル選択ボタンから、ブラウザの強力なフォーカスロックを「強制的に剥ぎ取る」
-    // これにより、ブラウザのセキュリティガードをバイパスし、後の自動タイピングを100%有効化します
-    e.target.blur();
-
     const reader = new FileReader();
     reader.onload = async (f) => {
-      // 差し替えに伴い、キャンバス内の既存の「古い物件名テキスト」を検索して完全に削除
+      // 1. 画像の差し替えに伴い、キャンバス内の既存の「古い物件名テキスト」を検索して完全に削除
       const existingObjects = canvas.getObjects();
       existingObjects.forEach((obj: any) => {
         if (obj && obj._isPropertyTitle) {
@@ -844,7 +869,7 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       undoStack.current = [];
       redoStack.current = [];
 
-      // ★2. 右下に配置する「物件名入力テキストボックス」を新規生成
+      // 2. 右下に配置する「物件名入力テキストボックス」を初期ガイド付きで新規生成
       const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
         fontSize: 14,
         fontWeight: 'bold',
@@ -857,7 +882,7 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         top: canvas.height! - 20, // 下端から20px内側
         hasControls: false, // リサイズハンドルは不要
         hasBorders: true,
-        borderColor: '#3b82f6', // 編集時にわかりやすい青枠
+        borderColor: '#3b82f6', // 選択・編集時にわかりやすい青枠
         cornerSize: 0,
         lockMovementX: false, // 物件名は図面に応じて位置を微調整できるように移動は許可
         lockMovementY: false,
@@ -866,41 +891,32 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       // 特製識別フラグを付与（次回画像インポート時の削除用、およびUndo/Redo保存用）
       (propertyTitle as any)._isPropertyTitle = true;
 
-      // ★追加：物件名テキストに専用のキーボード挙動（Enterで確定、Shift+Enterで改行）を仕込む
-      propertyTitle.onKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          if (e.shiftKey) {
-            // ① Shift + Enter の場合は、最新の Fabric.js (v6) の仕様に合わせて安全に改行を挿入する
+      // 専用のキーボード挙動（Enterで確定、Shift+Enterで改行）を仕込む
+      propertyTitle.onKeyDown = (eEvent: KeyboardEvent) => {
+        if (eEvent.key === 'Enter') {
+          if (eEvent.shiftKey) {
+            // Shift + Enter の場合は安全に改行を挿入
             (propertyTitle as any).insertChars('\n');
             propertyTitle.canvas?.requestRenderAll();
             return;
           } else {
-            // ② 単なる Enter の場合は、標準の改行をキャンセルし、編集を終了（確定）させる
-            e.preventDefault();
+            // 単なる Enter の場合は編集を終了（確定）
+            eEvent.preventDefault();
             propertyTitle.exitEditing(); 
             return;
           }
         }
-        // Enter以外のキー（文字のタイピングなど）は、本来のITextの処理にそのまま流す
-        fabric.IText.prototype.onKeyDown.call(propertyTitle, e);
+        fabric.IText.prototype.onKeyDown.call(propertyTitle, eEvent);
       };
 
       // キャンバスへ追加
       canvas.add(propertyTitle);
       saveHistory(canvas);
+      
+      // 最初はフリーな状態（選択状態）で美しく描画してアピール
+      canvas.discardActiveObject();
+      canvas.setActiveObject(propertyTitle);
       canvas.renderAll();
-
-      // ★核心：配置された瞬間に、即座にフォーカスを奪って自動入力を開始させる
-      setTimeout(() => {
-        // ① まずブラウザのフォーカスを`<input>`ボタンからキャンバスへ強制的に引っ張ってくる
-        canvas.getSelectionElement().focus();
-
-        // ② その上でテキストを編集モード＆全選択状態にする
-        canvas.setActiveObject(propertyTitle);
-        propertyTitle.enterEditing();
-        propertyTitle.selectAll();
-        canvas.requestRenderAll();
-      }, 300); // 念のため、画像配置から少し時間差を空けて確実にフォーカスさせる
     };
     reader.readAsDataURL(file);
   };
