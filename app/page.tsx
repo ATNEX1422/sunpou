@@ -7,9 +7,7 @@ const FloorPlanEditor = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   const [isPlacing, setIsPlacing] = useState<boolean>(false);
-  const [dimMode, setDimMode] = useState<'W' | 'W_D' | 'W_H' | 'W_D_H'>('W');
-
-  // ★コピペ用：クリップボード（JSON文字列）
+  const [dimMode, setDimMode] = useState<'W' | 'W_D' | 'W_H' | 'W_D_H' | 'TEXT_ONLY' | 'ARROW_ONLY'>('W');
   const copiedJsonRef = useRef<string | null>(null);
 
   // ★Undo/Redo用：履歴スタック
@@ -17,7 +15,7 @@ const FloorPlanEditor = () => {
   const redoStack = useRef<string[]>([]);
   const isRespondingToHistory = useRef<boolean>(false); // 履歴復元中のイベント重複防止フラグ
 
- // ★共通ヘルパー：すべてのテキストを「各行左揃え」のまま、寸法線の少し下に美しく縦並びにするロジック
+  // ★共通ヘルパー：すべてのテキストを「各行左揃え」のまま、寸法線の少し下に美しく縦並びにするロジック
   const updateCombinedTextPosition = (target: fabric.Group, parts: any) => {
     if (!parts || !parts.textElements) return;
 
@@ -58,7 +56,7 @@ const FloorPlanEditor = () => {
     let currentLeft = rotatedX - (maxLineWidth / 2);
     const startX = currentLeft; // 改行時のリセット用位置
 
-// --- 3. 【新ロジック】全モードの総行数と総高さを正確に計算する ---
+    // --- 3. 【新ロジック】全モードの総行数と総高さを正確に計算する ---
     let totalLines = 1;
     parts.textElements.forEach((textObj: fabric.Object) => {
       if ((textObj as any)._isNewLine) totalLines++;
@@ -91,8 +89,6 @@ const FloorPlanEditor = () => {
       });
 
       // 3. ★核心：この行の「理想のY座標」を計算する
-      // 塊全体の中心（rotatedY）から、行数に応じて均等に上下に振り分けます。
-      // これにより、1行の時はジャスト中心、3行の時も全体の中央が軸になります！
       const lineY = rotatedY - (totalTextHeight / 2) + (currentLineIndex * lineHeight) + (lineHeight / 2);
 
       // 4. 行頭揃えの左端から、中心基準で各パーツを配置
@@ -107,7 +103,6 @@ const FloorPlanEditor = () => {
           originX: 'center',
           originY: 'center',
           left: currentLeft + (objWidth / 2),
-          // ★フォント固有の微調整（-1.5px）をここに適用
           top: lineY  
         });
         textObj.setCoords();
@@ -124,7 +119,6 @@ const FloorPlanEditor = () => {
   const saveHistory = (fCanvas: fabric.Canvas) => {
     if (isRespondingToHistory.current) return;
     
-    // カスタムプロパティ（_dimMode, _parentGroupなど）を網羅してシリアライズ
     const json = JSON.stringify(fCanvas.toObject([
       '_dimMode', 
       '_dimensionParts', 
@@ -142,11 +136,10 @@ const FloorPlanEditor = () => {
       'hasBorders'
     ]));
 
-    // 直近と同じ状態ならスタックへの重複保存をスキップ
     if (undoStack.current.length > 0 && undoStack.current[undoStack.current.length - 1] === json) return;
 
     undoStack.current.push(json);
-    redoStack.current = []; // 新しい操作をしたら進むスタックはクリア
+    redoStack.current = []; 
   };
 
   // ★Undo/Redo用：歴史をロードしてオブジェクト間の参照リンクを再構築する関数
@@ -154,17 +147,14 @@ const FloorPlanEditor = () => {
     isRespondingToHistory.current = true;
     fCanvas.discardActiveObject();
     
-    // 背景画像を維持するために一時避難
     const bgImage = fCanvas.backgroundImage;
 
     await fCanvas.loadFromJSON(jsonStr);
 
-    // 背景画像の再適用
     if (bgImage) {
       fCanvas.backgroundImage = bgImage;
     }
 
-    // ロードされたオブジェクトたちの親子関係（紐付け参照リンク）を1から再構築する
     const objects = fCanvas.getObjects();
     const groups = objects.filter(obj => obj instanceof fabric.Group) as fabric.Group[];
     const texts = objects.filter(obj => obj instanceof fabric.IText) as fabric.IText[];
@@ -173,7 +163,6 @@ const FloorPlanEditor = () => {
       const parts: any = {};
       const linkedTexts: fabric.Object[] = [];
 
-      // 内部パーツ（線、矢印）の再割り当て
       group.getObjects().forEach((child: any, index: number) => {
         if (index === 0) parts.wLine = child;
         if (index === 1) parts.wLeft = child;
@@ -183,9 +172,7 @@ const FloorPlanEditor = () => {
         if (index === 5) parts.dBottom = child;
       });
 
-      // このグループを親に持つテキスト群を探索して再リンク
       texts.forEach((textObj: any) => {
-        // loadFromJSON時のIDや中身の座標参照から、元の親子関係を復元
         if (textObj._parentGroup && 
             Math.abs(textObj._parentGroup.left - group.left) < 50 && 
             Math.abs(textObj._parentGroup.top - group.top) < 50) {
@@ -194,7 +181,6 @@ const FloorPlanEditor = () => {
         }
       });
 
-      // テキスト群を正しいレイアウト順（Wラベル➔W数字...）にソートして格納
       parts.textElements = linkedTexts.sort((a: any, b: any) => {
         const topDiff = (a._customTopOffset || 0) - (b._customTopOffset || 0);
         if (topDiff !== 0) return topDiff;
@@ -202,8 +188,6 @@ const FloorPlanEditor = () => {
       });
 
       group._dimensionParts = parts;
-
-      // 復元された位置を美しく再計算
       updateCombinedTextPosition(group, parts);
     });
 
@@ -221,10 +205,8 @@ const FloorPlanEditor = () => {
       centeredScaling: true,
     });
 
-    // --- 歴史を記録するトリガーイベント群の登録 ---
-    fabricCanvas.on('object:modified', () => saveHistory(fabricCanvas)); // 移動・変形・回転が「確定」した時
+    fabricCanvas.on('object:modified', () => saveHistory(fabricCanvas));
 
-    // 1. 移動時の追従
     fabricCanvas.on('object:moving', (options: any) => {
       const target = options.target;
       if (!target) return;
@@ -235,7 +217,6 @@ const FloorPlanEditor = () => {
       fabricCanvas.requestRenderAll();
     });
 
-    // 2. 伸縮時の追従
     fabricCanvas.on('object:scaling', (options: any) => {
       const target = options.target;
       if (!target || !(target instanceof fabric.Group)) return;
@@ -273,7 +254,6 @@ const FloorPlanEditor = () => {
       fabricCanvas.requestRenderAll();
     });
 
-    // 3. 回転時の制御
     fabricCanvas.on('object:rotating', (options: any) => {
       const target = options.target;
       if (!target || !(target instanceof fabric.Group)) return;
@@ -293,7 +273,6 @@ const FloorPlanEditor = () => {
       fabricCanvas.requestRenderAll();
     });
 
-    // 4. 数字のダブルクリック再編集の強制起動処理
     fabricCanvas.on('mouse:dblclick', (options) => {
       const target = options.target;
       if (!target) return;
@@ -314,11 +293,18 @@ const FloorPlanEditor = () => {
 
       const pointer = fabricCanvas.getScenePoint(options.e);
       if (pointer) {
-        // 配置直前の状態をセーブ
         saveHistory(fabricCanvas);
 
         const currentMode = (fabricCanvas as any)._currentDimMode || 'W';
-        createDimensionAtPosition(fabricCanvas, pointer.x, pointer.y, '#ef4444', currentMode);
+
+        // ★修正：型エラーが起きていた currentColor を除去し '#ef4444' 固定で完全に同期
+        if (currentMode === 'TEXT_ONLY') {
+          createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#000000');
+        } else if (currentMode === 'ARROW_ONLY') {
+          createSingleArrow(fabricCanvas, pointer.x, pointer.y, '#ef4444');
+        } else {
+          createDimensionAtPosition(fabricCanvas, pointer.x, pointer.y, '#ef4444', currentMode);
+        }
 
         (fabricCanvas as any)._isPlacingMode = false;
         setIsPlacing(false);
@@ -331,26 +317,22 @@ const FloorPlanEditor = () => {
               obj.evented = true;
             }
           });
-          // 配置完了後の状態を確定セーブ
           saveHistory(fabricCanvas);
           fabricCanvas.renderAll();
         }, 10);
       }
-    });    
-    // ★修正：windowではなく、Fabric.jsのキャンバスのコンテナ要素に直接キー監視を仕込む
-    // これにより、Next.jsのクロージャバグや、Deleteキーが虚空に消える現象を100%シャットアウトします
+    });
+
     const canvasElement = fabricCanvas.getSelectionElement();
     if (canvasElement) {
-      // キーボードイベントを受け取れるようにフォーカス可能にする
       canvasElement.tabIndex = 1000;
       canvasElement.style.outline = 'none';
 
       canvasElement.addEventListener('keydown', (e: KeyboardEvent) => {
         const key = e.key.toLowerCase();
         const active = fabricCanvas.getActiveObject();
-        if (active && (active as any).isEditing) return; // 文字入力中はショートカットを無視
+        if (active && (active as any).isEditing) return;
 
-        // --- 1. Undo処理 (Ctrl + Z) ---
         if ((e.ctrlKey || e.metaKey) && key === 'z') {
           e.preventDefault();
           if (undoStack.current.length === 0) return;
@@ -363,7 +345,6 @@ const FloorPlanEditor = () => {
           return;
         }
 
-        // --- 2. Redo処理 (Ctrl + Y) ---
         if ((e.ctrlKey || e.metaKey) && key === 'y') {
           e.preventDefault();
           if (redoStack.current.length === 0) return;
@@ -376,7 +357,6 @@ const FloorPlanEditor = () => {
           return;
         }
 
-        // --- 3. コピー処理 (Ctrl + C) ---
         if ((e.ctrlKey || e.metaKey) && key === 'c') {
           if (!active) return;
 
@@ -402,33 +382,29 @@ const FloorPlanEditor = () => {
           return;
         }
 
-        // --- 4. ペースト処理 (Ctrl + V) ---
         if ((e.ctrlKey || e.metaKey) && key === 'v') {
           if (!copiedJsonRef.current) return;
           e.preventDefault();
 
-          saveHistory(fabricCanvas); // ペースト直前の状態をセーブ
+          saveHistory(fabricCanvas);
 
           const clipboardData = JSON.parse(copiedJsonRef.current);
 
           (async () => {
-            // ① 寸法線本体（矢印グループ）の復元
             const clonedGroup = await fabric.Group.fromObject(clipboardData.group);
             const dimMode = clipboardData.dimMode;
             
-            // コピペ位置を少し右下にずらす
             clonedGroup.set({
               left: (clipboardData.group.left || 0) + 20,
               top: (clipboardData.group.top || 0) + 20,
               selectable: true,
               evented: true,
-              objectCaching: false // ★追加：伸縮時に中身がボヤけたり見切れたりするのを防ぐ
+              objectCaching: false
             });
 
             const clonedParts: any = {};
             const newTextElements: fabric.Object[] = [];
 
-            // 内部パーツ（線、三角形）の役割を再紐付け
             clonedGroup.getObjects().forEach((obj: any, index: number) => {
               if (index === 0) clonedParts.wLine = obj;
               if (index === 1) clonedParts.wLeft = obj;
@@ -438,11 +414,8 @@ const FloorPlanEditor = () => {
               if (index === 5) clonedParts.dBottom = obj;
             });
 
-            // ② 連動するテキスト群の復元とルール再適用
             for (const tData of clipboardData.texts) {
               const clonedText = await fabric.IText.fromObject(tData);
-              
-              // ★修正：既存の数字・ラベルの厳格なルールをコピペ側にも100%強制適用する
               const isNum = tData.text !== 'W: ' && tData.text !== ' / ' && tData.text !== 'D: ' && tData.text !== 'H: ';
               
               clonedText.set({
@@ -451,8 +424,8 @@ const FloorPlanEditor = () => {
                 hasControls: false,
                 hasBorders: false,
                 objectCaching: false,
-                selectable: false, // バラバラ移動を防ぐ
-                evented: isNum,    // 数字だけダブルクリックを受け付ける
+                selectable: false,
+                evented: isNum,
                 lockMovementX: true,
                 lockMovementY: true,
                 lockScalingX: true,
@@ -460,7 +433,6 @@ const FloorPlanEditor = () => {
                 lockRotation: true
               });
               
-              // 親子関係の再リンク
               (clonedText as any)._parentGroup = clonedGroup;
               (clonedText as any)._isNewLine = tData._isNewLine;
               (clonedText as any)._customTopOffset = tData._customTopOffset;
@@ -468,12 +440,10 @@ const FloorPlanEditor = () => {
               newTextElements.push(clonedText);
             }
 
-            // 拡張プロパティの再定義
             (clonedGroup as any)._dimensionParts = clonedParts;
             (clonedGroup as any)._dimMode = dimMode;
             clonedParts.textElements = newTextElements;
 
-            // ★修正：既存ルールにのっとり、モードに応じて「伸縮ハンドル（コントロール）」の表示・非表示を再設定する
             if (dimMode === 'W' || dimMode === 'W_H') {
               clonedGroup.setControlsVisibility({
                 mt: false, mb: false, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true,
@@ -485,19 +455,13 @@ const FloorPlanEditor = () => {
               });
             }
 
-            // ③ キャンバスへ追加
             fabricCanvas.add(clonedGroup);
             newTextElements.forEach(t => fabricCanvas.add(t));
 
-            // 左揃えレイアウトをその場で再計算
             updateCombinedTextPosition(clonedGroup, clonedParts);
             
-            // 連動キー入力ロジック（setupSequence）をペーストした新しい文字たちにも再セットアップする
-            // ※新規配置時のW・D・H連鎖ロジックをここでも再適用させるため、setupSequenceを動かします。
-            // ただし、このままだとsetupSequenceがスコープ外なので、一番手軽なのは既存の「文字変更時イベント」を再バインドすることですが、
-            // 今回はペーストされたオブジェクトに対して、外側からテキスト編集イベントを再定義します。
             newTextElements.forEach((textObj: any) => {
-              if (textObj.evented) { // 数字オブジェクトの場合
+              if (textObj.evented) {
                 textObj.on('changed', () => {
                   textObj.text = textObj.text.replace(/[^0-9\n]/g, '');
                   updateCombinedTextPosition(clonedGroup, clonedParts);
@@ -536,19 +500,18 @@ const FloorPlanEditor = () => {
             fabricCanvas.discardActiveObject();
             fabricCanvas.setActiveObject(clonedGroup);
             
-            saveHistory(fabricCanvas); // ペースト完了後の状態を確定セーブ
+            saveHistory(fabricCanvas);
             fabricCanvas.requestRenderAll();
           })();
           return;
         }
 
-        // --- 5. 削除処理 (Delete / Backspace) ---
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
           const activeObjects = fabricCanvas.getActiveObjects();
           if (activeObjects.length === 0) return;
 
-          saveHistory(fabricCanvas); // 削除前の歴史を保存
+          saveHistory(fabricCanvas);
           
           activeObjects.forEach(obj => {
             if (obj && (obj as any)._dimensionParts && (obj as any)._dimensionParts.textElements) {
@@ -564,7 +527,7 @@ const FloorPlanEditor = () => {
             fabricCanvas.remove(obj);
           });
           fabricCanvas.discardActiveObject();
-          saveHistory(fabricCanvas); // 削除完了後の歴史を確定
+          saveHistory(fabricCanvas);
           fabricCanvas.requestRenderAll();
         }
       });
@@ -573,7 +536,7 @@ const FloorPlanEditor = () => {
     return () => {
       fabricCanvas.dispose();
     };
-  }, []); // コピペデータの更新をキー監視に同期させる
+  }, []);
 
   // --- 次元（寸法線）生成ロジック ---
   const createDimensionAtPosition = (
@@ -625,14 +588,13 @@ const FloorPlanEditor = () => {
       left: x, top: y, originX: 'center', originY: 'center', objectCaching: false,
     });
 
-   // --- 2. 各テキストパーツの生成 ---
     const textElements: fabric.Object[] = [];
     const textGroupParts: any = {};
 
     const baseStyle = { 
       fontSize: 12, 
       fontWeight: '500' as const, 
-      fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif', // ★修正：シンプルでおしゃれなモダンフォントを指定
+      fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
       fill: color, 
       originX: 'center' as const, 
       originY: 'center' as const,
@@ -644,19 +606,14 @@ const FloorPlanEditor = () => {
       lockRotation: true
     };
 
-    // 固定ラベル（完全にクリックをスルー）
     const labelStyle = { ...baseStyle, selectable: false, evented: false };
-
-    // 数字部分（ダブルクリックを検知）
     const numStyle = { ...baseStyle, backgroundColor: 'rgba(255, 255, 255, 0.85)', selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
 
-    // 1行目 (W): 常に0px
     const lblW = new fabric.IText('W: ', labelStyle);
     const numW = new fabric.IText('00', numStyle);
     textElements.push(lblW, numW);
     textGroupParts.numW = numW;
 
-    // 2行目 (D): W_D または W_D_H のときは 18px 下げる
     if (dimMode === 'W_D' || dimMode === 'W_D_H') {
       const lblD = new fabric.IText('D: ', labelStyle);
       const numD = new fabric.IText('00', numStyle);
@@ -669,12 +626,10 @@ const FloorPlanEditor = () => {
       textGroupParts.numD = numD;
     }
 
-    // 3行目 (H): モードによって下げる位置（オフセット）を動的に変える
     if (dimMode === 'W_H' || dimMode === 'W_D_H') {
       const lblH = new fabric.IText('H: ', labelStyle);
       const numH = new fabric.IText('00', numStyle);
       
-      // W_D_H なら3行目(36px)、W_H ならDがないので2行目(18px)にする
       const hOffset = dimMode === 'W_D_H' ? 36 : 18;
 
       (lblH as any)._isNewLine = true;
@@ -698,7 +653,6 @@ const FloorPlanEditor = () => {
 
     updateCombinedTextPosition(group, dimensionParts);
 
-    // --- 3. 連動キー入力ロジック ---
     const setupSequence = (currentNum: fabric.IText, nextNum?: fabric.IText) => {
       if (!currentNum) return;
 
@@ -742,7 +696,6 @@ const FloorPlanEditor = () => {
         currentNum.setCoords();
         updateCombinedTextPosition(group, dimensionParts);
         
-        // 文字入力確定後の状態をセーブ
         saveHistory(fCanvas);
         fCanvas.requestRenderAll();
 
@@ -800,6 +753,7 @@ const FloorPlanEditor = () => {
     fCanvas.requestRenderAll();
   };
   
+  // ★修正：「寸法追加」ボタンを押したときのロジックに TEXT_ONLY と ARROW_ONLY のルートも完全マージ
   const addDimension = () => {
     if (!canvas) return;
     (canvas as any)._currentDimMode = dimMode;
@@ -829,13 +783,14 @@ const FloorPlanEditor = () => {
   const rotateSelected = (angleStep: number) => {
     if (!canvas) return;
     const active = canvas.getActiveObject() as any;
-    if (active && active.type === 'group') {
+    if (active) {
+      // グループ（寸法線・片方矢印）または単体テキスト（テキストのみ）の両方の回転に対応
       const newAngle = (active.angle + angleStep) % 360;
       active.set('angle', newAngle);
-      if (active._dimensionParts) {
+      if (active.type === 'group' && active._dimensionParts) {
         updateCombinedTextPosition(active, active._dimensionParts);
       }
-      saveHistory(canvas); // 回転確定後のセーブ
+      saveHistory(canvas); 
       canvas.renderAll();
     }
   };
@@ -876,19 +831,29 @@ const FloorPlanEditor = () => {
           if (parentParts.dBottom) parentParts.dBottom.set('fill', newColor);
         }
       }
+      // 単体のテキストボックスや矢印の直系の色変更にも対応
+      else if (obj) {
+        if (obj.type === 'i-text') {
+          obj.set('fill', newColor);
+        } else if (obj.type === 'group') {
+          obj.getObjects().forEach((child: any) => {
+            if (child.stroke) child.set('stroke', newColor);
+            if (child.fill) child.set('fill', newColor);
+          });
+        }
+      }
     });
 
-    saveHistory(canvas); // 色変更後のセーブ
+    saveHistory(canvas); 
     canvas.requestRenderAll();
   };
 
-const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !canvas) return;
 
     const reader = new FileReader();
     reader.onload = async (f) => {
-      // 1. 画像の差し替えに伴い、キャンバス内の既存の「古い物件名テキスト」を検索して完全に削除
       const existingObjects = canvas.getObjects();
       existingObjects.forEach((obj: any) => {
         if (obj && obj._isPropertyTitle) {
@@ -896,50 +861,43 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         }
       });
 
-      // 画像のインポートとリサイズ処理
       const img = await fabric.FabricImage.fromURL(f.target?.result as string);
       const scale = Math.min(canvas.width! / img.width!, canvas.height! / img.height!);
       img.scale(scale < 1 ? scale : 1);
       img.set({ left: canvas.width! / 2, top: canvas.height! / 2, originX: 'center', originY: 'center' });
       canvas.backgroundImage = img;
       
-      // 履歴スタックを初期化
       undoStack.current = [];
       redoStack.current = [];
 
-      // 2. 右下に配置する「物件名入力テキストボックス」を初期ガイド付きで新規生成
       const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
         fontSize: 14,
         fontWeight: '500',
         fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
-        fill: '#1f2937', // 高級感のあるダークグレー
-        backgroundColor: 'rgba(255, 255, 255, 0.9)', // 図面に被っても読めるように白背景
+        fill: '#1f2937', 
+        backgroundColor: 'rgba(255, 255, 255, 0.9)', 
         padding: 6,
-        originX: 'right', // 右下配置なので右揃え
-        originY: 'bottom', // 右下配置なので下揃え
-        left: canvas.width! - 20, // 右端から20px内側
-        top: canvas.height! - 20, // 下端から20px内側
-        hasControls: false, // リサイズハンドルは不要
+        originX: 'right', 
+        originY: 'bottom', 
+        left: canvas.width! - 20, 
+        top: canvas.height! - 20, 
+        hasControls: false, 
         hasBorders: true,
-        borderColor: '#3b82f6', // 選択・編集時にわかりやすい青枠
+        borderColor: '#3b82f6', 
         cornerSize: 0,
-        lockMovementX: false, // 物件名は図面に応じて位置を微調整できるように移動は許可
+        lockMovementX: false, 
         lockMovementY: false,
       });
 
-      // 特製識別フラグを付与（次回画像インポート時の削除用、およびUndo/Redo保存用）
       (propertyTitle as any)._isPropertyTitle = true;
 
-      // 専用のキーボード挙動（Enterで確定、Shift+Enterで改行）を仕込む
       propertyTitle.onKeyDown = (eEvent: KeyboardEvent) => {
         if (eEvent.key === 'Enter') {
           if (eEvent.shiftKey) {
-            // Shift + Enter の場合は安全に改行を挿入
             (propertyTitle as any).insertChars('\n');
             propertyTitle.canvas?.requestRenderAll();
             return;
           } else {
-            // 単なる Enter の場合は編集を終了（確定）
             eEvent.preventDefault();
             propertyTitle.exitEditing(); 
             return;
@@ -948,16 +906,129 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         fabric.IText.prototype.onKeyDown.call(propertyTitle, eEvent);
       };
 
-      // キャンバスへ追加
       canvas.add(propertyTitle);
       saveHistory(canvas);
       
-      // 最初はフリーな状態（選択状態）で美しく描画してアピール
       canvas.discardActiveObject();
       canvas.setActiveObject(propertyTitle);
       canvas.renderAll();
     };
     reader.readAsDataURL(file);
+  };
+
+  // ★追加：テキストボックスのみを配置する関数（大きさ変更不可）
+  const createTextBoxOnly = (fCanvas: fabric.Canvas, x: number, y: number, color: string = '#000000') => {
+    const textObj = new fabric.IText('テキスト入力', {
+      left: x,
+      top: y,
+      fontSize: 14,
+      fontWeight: '500',
+      fontFamily: 'Roboto, Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
+      fill: color,
+      backgroundColor: 'rgba(255, 255, 255, 0.85)',
+      padding: 4,
+      originX: 'center',
+      originY: 'center',
+      hasControls: true, 
+      hasBorders: true,
+      borderColor: '#3b82f6',
+    });
+
+    textObj.setControlsVisibility({
+      mt: false, mb: false, ml: false, mr: false, 
+      bl: false, br: false, tl: false, tr: false, 
+      mtr: true, 
+    });
+
+    textObj.onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        if (e.shiftKey) {
+          (textObj as any).insertChars('\n');
+          textObj.canvas?.requestRenderAll();
+          return;
+        } else {
+          e.preventDefault();
+          textObj.exitEditing();
+          return;
+        }
+      }
+      fabric.IText.prototype.onKeyDown.call(textObj, e);
+    };
+
+    textObj.on('editing:exited', () => {
+      if (textObj.text.trim() === '') {
+        textObj.text = 'テキスト入力';
+      }
+      saveHistory(fCanvas);
+      fCanvas.requestRenderAll();
+    });
+
+    fCanvas.add(textObj);
+    fCanvas.setActiveObject(textObj);
+    textObj.enterEditing();
+    textObj.selectAll();
+    fCanvas.requestRenderAll();
+  };
+
+ // ★修正：既存コードを100%流用し、wLeftを透明化することでエラーを完全回避した片方矢印関数
+  const createSingleArrow = (fCanvas: fabric.Canvas, x: number, y: number, color: string = '#ef4444') => {
+    const length = 80;
+    const arrowSize = 8;
+    const objectsToGroup: fabric.Object[] = [];
+    const dimensionParts: any = {};
+
+    // 1. 線（中心基準）
+    const wLine = new fabric.Line([-length / 2, 0, length / 2, 0], {
+      stroke: color, strokeWidth: 2, originX: 'center', originY: 'center',
+    });
+    
+    // 2. ★核心：左側の矢印も作りますが、opacity: 0（完全に透明）にしてユーザーには見えなくします！
+    // これにより、既存の object:scaling がエラーを吐かずに100%正常にすり抜けます。
+    const wLeft = new fabric.Triangle({
+      width: arrowSize, height: arrowSize, fill: color, angle: -90, originX: 'center', originY: 'center', 
+      left: -length / 2,
+      opacity: 0, // ★透明化
+      selectable: false,
+      evented: false
+    });
+
+    // 3. 右側の矢印（こちらは見える状態）
+    const wRight = new fabric.Triangle({
+      width: arrowSize, height: arrowSize, fill: color, angle: 90, originX: 'center', originY: 'center', 
+      left: length / 2
+    });
+
+    // 既存の寸法線「W」と全く同じパーツ構成でグループに登録
+    objectsToGroup.push(wLine, wLeft, wRight);
+    
+    dimensionParts.wLine = wLine;
+    dimensionParts.wLeft = wLeft;
+    dimensionParts.wRight = wRight;
+
+    // グループ化
+    const group = new fabric.Group(objectsToGroup, {
+      left: x, top: y, originX: 'center', originY: 'center', objectCaching: false,
+    });
+
+    (group as any)._dimensionParts = dimensionParts;
+    (group as any)._dimMode = 'W'; // 既存のWモードの伸縮ロジックを完全流用
+
+    // コントロールの制限（左右の ml, mr と回転 mtr のみ）
+    group.setControlsVisibility({
+      mt: false, mb: false, 
+      bl: false, br: false, tl: false, tr: false, 
+      ml: true,  mr: true,  
+      mtr: true, 
+    });
+    group.lockScalingY = true;
+
+    group.on('modified', () => {
+      saveHistory(fCanvas);
+    });
+
+    fCanvas.add(group);
+    fCanvas.setActiveObject(group);
+    fCanvas.requestRenderAll();
   };
 
   return (
@@ -966,14 +1037,37 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
         <div className="h-8 w-px bg-gray-200 mx-2" />
         
-          <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 text-sm font-medium">
-            <button onClick={() => setDimMode('W')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W</button>
-            <button onClick={() => setDimMode('W_D')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D</button>
-            <button onClick={() => setDimMode('W_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W×H</button>
-            <button onClick={() => setDimMode('W_D_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D×H</button>
-          </div>
+        {/* モード選択ボタンの並び */}
+        <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 text-sm font-medium">
+          <button onClick={() => setDimMode('W')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W</button>
+          <button onClick={() => setDimMode('W_D')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D</button>
+          <button onClick={() => setDimMode('W_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W×H</button>
+          <button onClick={() => setDimMode('W_D_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D×H</button>
+          
+          {/* テキストのみモードを選択するボタン */}
+          <button 
+            onClick={() => setDimMode('TEXT_ONLY')} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'TEXT_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            テキスト
+          </button>
+          
+          {/* 片方矢印モードを選択するボタン */}
+          <button 
+            onClick={() => setDimMode('ARROW_ONLY')} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'ARROW_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            ➔
+          </button>
+        </div>
 
-        <button onClick={addDimension} className={`px-4 py-2 rounded-lg transition font-medium shadow-sm ${isPlacing ? 'bg-amber-500 text-white animate-pulse ring-2 ring-amber-300' : 'bg-green-600 text-white hover:bg-green-700'}`}>寸法追加</button>
+        {/* 寸法追加ボタン */}
+        <button 
+          onClick={addDimension} 
+          className={`px-4 py-2 rounded-lg transition font-medium shadow-sm ${isPlacing ? 'bg-amber-500 text-white animate-pulse ring-2 ring-amber-300' : 'bg-green-600 text-white hover:bg-green-700'}`}
+        >
+          寸法追加
+        </button>
 
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
           <button onClick={() => rotateSelected(-90)} className="p-2 hover:bg-white rounded-md transition shadow-sm" title="左90度回転">↺</button>
@@ -985,7 +1079,7 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
           ))}
         </div>
 
-<button onClick={async () => {
+        <button onClick={async () => {
           if (typeof window === "undefined" || !canvas) return;
 
           // ① キャンバス内から物件名テキストボックスを検索して文字を抜き出す
@@ -995,25 +1089,22 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
           let propertyName = '';
           if (propertyTitleObj && propertyTitleObj.text) {
             const rawText = propertyTitleObj.text.trim();
-            // ガイド文字のまま、もしくは空文字の場合はファイル名に反映しない
             if (rawText !== '【ここに物件名を入力】' && rawText !== '') {
               propertyName = rawText;
             }
           }
 
-          // ② 決定するデフォルト名（物件名があれば「寸法_物件名.jpg」、なければ「寸法.jpg」）
+          // ② 決定するデフォルト名
           const defaultName = propertyName ? `寸法_${propertyName}.jpg` : '寸法.jpg';
 
-          // データURLとBlobの生成
           const dataURL = canvas.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 1 });
           const response = await fetch(dataURL);
           const blob = await response.blob();
 
-          // PC（Mac/Windows）のダイアログ保存に対応
           if ('showSaveFilePicker' in window) {
             try {
               const handle = await (window as any).showSaveFilePicker({
-                suggestedName: defaultName, // ★物件名連動の名前をセット
+                suggestedName: defaultName, 
                 types: [{ description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg'] } }],
               });
               const writable = await handle.createWritable();
@@ -1023,12 +1114,12 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
             } catch (err) { return; }
           }
 
-          // スマホや非対応ブラウザ用のダウンロード処理
           const link = document.createElement('a');
-          link.download = defaultName; // ★物件名連動の名前をセット
+          link.download = defaultName; 
           link.href = dataURL;
           link.click();
-        }} className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-black transition font-medium ml-auto">保存 (JPEG)</button>      </div>
+        }} className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-black transition font-medium ml-auto">保存 (JPEG)</button>
+      </div>
 
       <div className="border-4 border-white shadow-2xl rounded-lg overflow-hidden bg-white">
         <canvas ref={canvasRef} />
