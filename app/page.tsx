@@ -538,6 +538,39 @@ const FloorPlanEditor = () => {
           saveHistory(fabricCanvas);
           fabricCanvas.requestRenderAll();
         }
+
+        const arrowKeys = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+        if (arrowKeys.includes(key)) {
+          // 選択中のオブジェクト（単体または複数グループ）がなければ処理しない
+          if (!active) return;
+          
+          // 文字入力（編集）中の場合は、カーソル移動を優先させるため処理をスルー
+          if ((active as any).isEditing) return;
+
+          e.preventDefault(); // ブラウザ全体のスクロールを防止
+
+          // Shiftキーが押されていれば10px、通常なら1px移動
+          const moveStep = e.shiftKey ? 10 : 1;
+          
+          // 歴史（Undo/Redo）に移動前の状態を登録
+          saveHistory(fabricCanvas);
+
+          // 押されたキーに応じて座標をシフト
+          if (key === 'arrowup')    active.set('top',  active.top! - moveStep);
+          if (key === 'arrowdown')  active.set('top',  active.top! + moveStep);
+          if (key === 'arrowleft')  active.set('left', active.left! - moveStep);
+          if (key === 'arrowright') active.set('left', active.left! + moveStep);
+
+          // 寸法線グループだった場合、連動するテキストの位置も追従させる
+          if (active instanceof fabric.Group && (active as any)._dimensionParts) {
+            updateCombinedTextPosition(active, (active as any)._dimensionParts);
+          }
+
+          // 選択枠（コントロール）の位置を再計算して再描画
+          active.setCoords();
+          fabricCanvas.requestRenderAll();
+        }
+
       });
     }
 
@@ -615,8 +648,7 @@ const FloorPlanEditor = () => {
     };
 
     const labelStyle = { ...baseStyle, selectable: false, evented: false };
-    const numStyle = { ...baseStyle, backgroundColor: 'rgba(255, 255, 255, 0.85)', selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
-
+const numStyle = { ...baseStyle, selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
     const lblW = new fabric.IText('W: ', labelStyle);
     const numW = new fabric.IText('00', numStyle);
     textElements.push(lblW, numW);
