@@ -297,7 +297,6 @@ const FloorPlanEditor = () => {
 
         const currentMode = (fabricCanvas as any)._currentDimMode || 'W';
 
-        // ★修正：型エラーが起きていた currentColor を除去し '#ef4444' 固定で完全に同期
         if (currentMode === 'TEXT_ONLY') {
           createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#000000');
         } else if (currentMode === 'ARROW_ONLY') {
@@ -306,17 +305,26 @@ const FloorPlanEditor = () => {
           createDimensionAtPosition(fabricCanvas, pointer.x, pointer.y, '#ef4444', currentMode);
         }
 
+        // ★ここを修正：配置モード自体はここで一度オフにします
         (fabricCanvas as any)._isPlacingMode = false;
         setIsPlacing(false);
         fabricCanvas.defaultCursor = 'default';
         
         setTimeout(() => {
+          // ★核心：現在アクティブなオブジェクト（まさに今入力待機しているテキスト）がある場合は、
+          // その編集を邪魔しないように、それ以外のオブジェクトだけを選択可能に戻します。
+          const activeObj = fabricCanvas.getActiveObject();
+          
           fabricCanvas.getObjects().forEach(obj => {
             if (!(obj as any)._parentGroup) {
-              obj.selectable = true;
-              obj.evented = true;
+              // 今入力中のテキストボックスでなければ、選択可能にする
+              if (obj !== activeObj) {
+                obj.selectable = true;
+                obj.evented = true;
+              }
             }
           });
+          
           saveHistory(fabricCanvas);
           fabricCanvas.renderAll();
         }, 10);
@@ -1031,43 +1039,100 @@ const FloorPlanEditor = () => {
     fCanvas.requestRenderAll();
   };
 
-  return (
+ return (
     <div className="flex flex-col items-center gap-4 p-8 bg-gray-50 min-h-screen font-sans">
       <div className="flex flex-wrap gap-4 mb-4 items-center bg-white p-4 rounded-xl shadow-md border border-gray-100">
         <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
         <div className="h-8 w-px bg-gray-200 mx-2" />
         
-        {/* モード選択ボタンの並び */}
+        {/* モード選択ボタンの並び（押した瞬間に配置スタンバイへ移行します） */}
         <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 text-sm font-medium">
-          <button onClick={() => setDimMode('W')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W</button>
-          <button onClick={() => setDimMode('W_D')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D</button>
-          <button onClick={() => setDimMode('W_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>↔ W×H</button>
-          <button onClick={() => setDimMode('W_D_H')} className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>✛ W×D×H</button>
-          
-          {/* テキストのみモードを選択するボタン */}
           <button 
-            onClick={() => setDimMode('TEXT_ONLY')} 
-            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'TEXT_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('W');
+              (canvas as any)._currentDimMode = 'W';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            ↔ W
+          </button>
+          
+          <button 
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('W_D');
+              (canvas as any)._currentDimMode = 'W_D';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_D' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            ✛ W×D
+          </button>
+          
+          <button 
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('W_H');
+              (canvas as any)._currentDimMode = 'W_H';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_H' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            ↔ W×H
+          </button>
+          
+          <button 
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('W_D_H');
+              (canvas as any)._currentDimMode = 'W_D_H';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D_H' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_D_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            ✛ W×D×H
+          </button>
+          
+          <button 
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('TEXT_ONLY');
+              (canvas as any)._currentDimMode = 'TEXT_ONLY';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'TEXT_ONLY' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'TEXT_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             テキスト
           </button>
           
-          {/* 片方矢印モードを選択するボタン */}
           <button 
-            onClick={() => setDimMode('ARROW_ONLY')} 
-            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'ARROW_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
+            onClick={() => {
+              if (!canvas) return;
+              setDimMode('ARROW_ONLY');
+              (canvas as any)._currentDimMode = 'ARROW_ONLY';
+              (canvas as any)._isPlacingMode = true;
+              setIsPlacing(true);
+              canvas.defaultCursor = 'crosshair';
+            }} 
+            className={`px-3 py-1.5 rounded-md transition ${dimMode === 'ARROW_ONLY' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'ARROW_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ➔
           </button>
         </div>
 
-        {/* 寸法追加ボタン */}
-        <button 
-          onClick={addDimension} 
-          className={`px-4 py-2 rounded-lg transition font-medium shadow-sm ${isPlacing ? 'bg-amber-500 text-white animate-pulse ring-2 ring-amber-300' : 'bg-green-600 text-white hover:bg-green-700'}`}
-        >
-          寸法追加
-        </button>
+        {/* 💡 古い「寸法追加」ボタンは自動化されたため綺麗に削除しました */}
 
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
           <button onClick={() => rotateSelected(-90)} className="p-2 hover:bg-white rounded-md transition shadow-sm" title="左90度回転">↺</button>
@@ -1082,7 +1147,6 @@ const FloorPlanEditor = () => {
         <button onClick={async () => {
           if (typeof window === "undefined" || !canvas) return;
 
-          // ① キャンバス内から物件名テキストボックスを検索して文字を抜き出す
           const objects = canvas.getObjects();
           const propertyTitleObj = objects.find((obj: any) => obj && obj._isPropertyTitle) as any;
           
@@ -1094,7 +1158,6 @@ const FloorPlanEditor = () => {
             }
           }
 
-          // ② 決定するデフォルト名
           const defaultName = propertyName ? `寸法_${propertyName}.jpg` : '寸法.jpg';
 
           const dataURL = canvas.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 1 });
