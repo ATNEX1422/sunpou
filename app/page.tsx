@@ -694,8 +694,8 @@ const FloorPlanEditor = () => {
       currentNum.on('editing:exited', () => {
         group.selectable = true;
         
-        const isInitialValue = (currentNum.text.trim() === '' || currentNum.text.trim() === '00');
-        if (isInitialValue) {
+        // 空文字やスペースだった場合のみ '00' にリセットする
+        if (currentNum.text.trim() === '') {
           currentNum.text = '00';
         } else {
           currentNum.text = currentNum.text.trim();
@@ -707,15 +707,14 @@ const FloorPlanEditor = () => {
         saveHistory(fCanvas);
         fCanvas.requestRenderAll();
 
-        if (nextNum && isInitialValue) {
+        if (nextNum) {
           setTimeout(() => {
             fCanvas.setActiveObject(nextNum);
             nextNum.enterEditing();
             nextNum.selectAll();
             fCanvas.requestRenderAll();
           }, 50);
-        } 
-        else {
+        } else {
           group.setCoords();
           fCanvas.setActiveObject(group);
           fCanvas.requestRenderAll();
@@ -856,7 +855,7 @@ const FloorPlanEditor = () => {
     canvas.requestRenderAll();
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !canvas) return;
 
@@ -913,6 +912,19 @@ const FloorPlanEditor = () => {
         }
         fabric.IText.prototype.onKeyDown.call(propertyTitle, eEvent);
       };
+
+      /* ==========================================================================
+         ★追加位置：物件名テキストをキャンバスに登録する直前
+         ========================================================================== */
+      // 画像差し替え時に、既存の全ての寸法線や数字を「最前面」へ引き上げ、選択・編集可能状態を強制再バインド
+      canvas.getObjects().forEach((obj) => {
+        // 子要素（寸法線の数字など）は親グループが制御するので、親がいない独立したオブジェクトだけを対象にする
+        if (!(obj as any)._parentGroup) {
+          canvas.bringObjectToFront(obj); // 最前面へ引き上げる
+          obj.selectable = true;          // 選択可能にする
+          obj.evented = true;             // マウスイベントを有効化する
+        }
+      });
 
       canvas.add(propertyTitle);
       saveHistory(canvas);
