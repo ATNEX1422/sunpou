@@ -629,13 +629,19 @@ const FloorPlanEditor = () => {
     const textElements: fabric.Object[] = [];
     const textGroupParts: any = {};
 
-    // 左揃えベースの基本スタイル
     const baseStyle = { 
-      fontSize: 12, fontWeight: 'bold' as const, fill: color, 
+      fontSize: 12, 
+      fontWeight: '500' as const, 
+      fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif', // ★修正：シンプルでおしゃれなモダンフォントを指定
+      fill: color, 
       originX: 'center' as const, 
       originY: 'center' as const,
-      hasControls: false, hasBorders: false, objectCaching: false,
-      lockScalingX: true, lockScalingY: true, lockRotation: true
+      hasControls: false, 
+      hasBorders: false, 
+      objectCaching: false,
+      lockScalingX: true, 
+      lockScalingY: true, 
+      lockRotation: true
     };
 
     // 固定ラベル（完全にクリックをスルー）
@@ -904,7 +910,8 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       // 2. 右下に配置する「物件名入力テキストボックス」を初期ガイド付きで新規生成
       const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
         fontSize: 14,
-        fontWeight: 'bold',
+        fontWeight: '500',
+        fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
         fill: '#1f2937', // 高級感のあるダークグレー
         backgroundColor: 'rgba(255, 255, 255, 0.9)', // 図面に被っても読めるように白背景
         padding: 6,
@@ -978,19 +985,35 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
           ))}
         </div>
 
-        <button onClick={async () => {
+<button onClick={async () => {
           if (typeof window === "undefined" || !canvas) return;
-          const now = new Date();
-          const yyyymmdd = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
-          const defaultName = `${yyyymmdd}_寸法図.jpg`;
+
+          // ① キャンバス内から物件名テキストボックスを検索して文字を抜き出す
+          const objects = canvas.getObjects();
+          const propertyTitleObj = objects.find((obj: any) => obj && obj._isPropertyTitle) as any;
+          
+          let propertyName = '';
+          if (propertyTitleObj && propertyTitleObj.text) {
+            const rawText = propertyTitleObj.text.trim();
+            // ガイド文字のまま、もしくは空文字の場合はファイル名に反映しない
+            if (rawText !== '【ここに物件名を入力】' && rawText !== '') {
+              propertyName = rawText;
+            }
+          }
+
+          // ② 決定するデフォルト名（物件名があれば「寸法_物件名.jpg」、なければ「寸法.jpg」）
+          const defaultName = propertyName ? `寸法_${propertyName}.jpg` : '寸法.jpg';
+
+          // データURLとBlobの生成
           const dataURL = canvas.toDataURL({ format: 'jpeg', quality: 0.8, multiplier: 1 });
           const response = await fetch(dataURL);
           const blob = await response.blob();
 
+          // PC（Mac/Windows）のダイアログ保存に対応
           if ('showSaveFilePicker' in window) {
             try {
               const handle = await (window as any).showSaveFilePicker({
-                suggestedName: defaultName,
+                suggestedName: defaultName, // ★物件名連動の名前をセット
                 types: [{ description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg'] } }],
               });
               const writable = await handle.createWritable();
@@ -999,12 +1022,13 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
               return;
             } catch (err) { return; }
           }
+
+          // スマホや非対応ブラウザ用のダウンロード処理
           const link = document.createElement('a');
-          link.download = defaultName;
+          link.download = defaultName; // ★物件名連動の名前をセット
           link.href = dataURL;
           link.click();
-        }} className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-black transition font-medium ml-auto">保存 (JPEG)</button>
-      </div>
+        }} className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-black transition font-medium ml-auto">保存 (JPEG)</button>      </div>
 
       <div className="border-4 border-white shadow-2xl rounded-lg overflow-hidden bg-white">
         <canvas ref={canvasRef} />
