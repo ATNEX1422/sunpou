@@ -58,27 +58,66 @@ const FloorPlanEditor = () => {
     let currentLeft = rotatedX - (maxLineWidth / 2);
     const startX = currentLeft; // 改行時のリセット用位置
 
-    // 各テキストパーツを配置
+// --- 3. 【新ロジック】全モードの総行数と総高さを正確に計算する ---
+    let totalLines = 1;
     parts.textElements.forEach((textObj: fabric.Object) => {
-      if ((textObj as any)._isNewLine) {
-        currentLeft = startX;
-      }
-
-      // 配置の基準を top で揃えて計算を安定させる
-      textObj.set({
-        scaleX: 1,
-        scaleY: 1,
-        originY: 'top', 
-        left: currentLeft,
-        top: rotatedY + ((textObj as any)._customTopOffset || 0)
-      });
-      textObj.setCoords();
-
-      // 本来のITextの挙動を維持するためセンターに戻す
-      textObj.originY = 'center';
-
-      currentLeft += (textObj.width || 0) + padding;
+      if ((textObj as any)._isNewLine) totalLines++;
     });
+    
+    // 1行あたり18pxとして、テキストの塊全体の総高さを出す
+    const lineHeight = 18;
+    const totalTextHeight = totalLines * lineHeight;
+
+    let lineStartIndex = 0;
+    let currentLineIndex = 0; // 現在何行目を処理しているか
+
+    // 全パーツを走査して、行ごとに配置を確定していく
+    while (lineStartIndex < parts.textElements.length) {
+      // 1. この行に属するパーツを抽出
+      const lineParts: fabric.Object[] = [];
+      let i = lineStartIndex;
+      while (i < parts.textElements.length) {
+        if (i > lineStartIndex && (parts.textElements[i] as any)._isNewLine) break;
+        lineParts.push(parts.textElements[i]);
+        i++;
+      }
+      lineStartIndex = i;
+
+      // 2. この行の総横幅を計算
+      let lineWidth = 0;
+      lineParts.forEach((textObj, idx) => {
+        lineWidth += textObj.width || 0;
+        if (idx < lineParts.length - 1) lineWidth += 2;
+      });
+
+      // 3. ★核心：この行の「理想のY座標」を計算する
+      // 塊全体の中心（rotatedY）から、行数に応じて均等に上下に振り分けます。
+      // これにより、1行の時はジャスト中心、3行の時も全体の中央が軸になります！
+      const lineY = rotatedY - (totalTextHeight / 2) + (currentLineIndex * lineHeight) + (lineHeight / 2);
+
+      // 4. 行頭揃えの左端から、中心基準で各パーツを配置
+      let currentLeft = rotatedX - (maxLineWidth / 2);
+      
+      lineParts.forEach((textObj) => {
+        const objWidth = textObj.width || 0;
+
+        textObj.set({
+          scaleX: 1,
+          scaleY: 1,
+          originX: 'center',
+          originY: 'center',
+          left: currentLeft + (objWidth / 2),
+          // ★フォント固有の微調整（-1.5px）をここに適用
+          top: lineY  
+        });
+        textObj.setCoords();
+
+        // 次のパーツのために左端を進める
+        currentLeft += objWidth + 2;
+      });
+
+      currentLineIndex++; // 次の行へ
+    }
   };
 
   // ★Undo/Redo用：現在のキャンバスの状態を丸ごとセーブする関数
@@ -593,7 +632,8 @@ const FloorPlanEditor = () => {
     // 左揃えベースの基本スタイル
     const baseStyle = { 
       fontSize: 12, fontWeight: 'bold' as const, fill: color, 
-      originX: 'left' as const, originY: 'center' as const,
+      originX: 'center' as const, 
+      originY: 'center' as const,
       hasControls: false, hasBorders: false, objectCaching: false,
       lockScalingX: true, lockScalingY: true, lockRotation: true
     };
