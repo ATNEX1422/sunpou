@@ -17,69 +17,70 @@ const FloorPlanEditor = () => {
   const redoStack = useRef<string[]>([]);
   const isRespondingToHistory = useRef<boolean>(false); // 履歴復元中のイベント重複防止フラグ
 
- // ★共通ヘルパー：文字数に応じて右側へ美しく自動整列させるロジック（モード別位置最適化）
+ // ★共通ヘルパー：すべてのテキストを「各行左揃え」のまま、寸法線の少し下に美しく縦並びにするロジック
   const updateCombinedTextPosition = (target: fabric.Group, parts: any) => {
     if (!parts || !parts.textElements) return;
 
     const angleRad = (target.angle || 0) * (Math.PI / 180);
     const dimMode = (target as any)._dimMode || 'W';
 
-    // ★修正：寸法線の形状（モード）に合わせて、文字の初期配置（オフセット）を動的に切り替える
+    // 1. 寸法線の形状に合わせて初期配置の基準点を決める
     let offsetX = 0;
     let offsetY = 0;
 
     if (dimMode === 'W' || dimMode === 'W_H') {
-      // 1. 十字ではない（ただの直線）の場合：寸法線の「真ん中（X=0）の5px真上（Y=少し上）」に配置
-      // ※グループ全体の高さ（height）を考慮して、線の真上にピタッと乗るように調整します
+      // 直線タイプ（W, W_H）は中央
       offsetX = 0;
-      offsetY = -((target.height / 2) + 12);
+      offsetY = (target.height / 2) + 24; 
     } else {
-      // 2. 十字（W_D や W_D_H）の場合：中央だと縦線と文字が丸被りするため、従来通り「右上45度」に逃がす
+      // 十字タイプ（W_D, W_D_H）は従来通り右上45度に逃がす
       offsetX = (target.width / 2) + 12;
       offsetY = -((target.height / 2) + 12);
     }
 
-    // 寸法線の中心座標と回転角から、文字を配置すべき絶対座標を計算
     const rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
     const rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
 
-    // ★修正：W や W_H（中央上部配置）のときは、文字の塊全体が「中央揃え」に見えるように、
-    // テキスト全体の総幅をあらかじめ計算して、左端（開始位置）を左側に半分ずらす（センタリング処理）
-    let currentLeft = rotatedX;
-    const padding = 2; // 文字同士のスキマ
+    // 縦に並んだテキストの最長幅（Wの行）を基準にして開始位置を左にずらす
+    let maxLineWidth = 0;
+    let currentLineWidth = 0;
+    const padding = 2;
 
-    if (dimMode === 'W' || dimMode === 'W_H') {
-      // 1行目の総幅を簡易計算（W: 00 / D: 00 などの全体幅）
-      let firstLineWidth = 0;
-      parts.textElements.forEach((textObj: fabric.Object) => {
-        if (!(textObj as any)._isNewLine) {
-          firstLineWidth += (textObj.width || 0) + padding;
-        }
-      });
-      // 開始位置を「総幅の半分」だけ左にオフセットすることで、全体が綺麗に中央上に乗る
-      currentLeft = rotatedX - (firstLineWidth / 2);
-    }
-
-    // 各テキストパーツ（ラベル、数字）を順に配置
-    const startX = currentLeft; // 改行時の一時記憶用
     parts.textElements.forEach((textObj: fabric.Object) => {
-      // Hなどの2行目の文字が来たら、X座標の開始位置を左端にリセットする
+      if ((textObj as any)._isNewLine) {
+        if (currentLineWidth > maxLineWidth) maxLineWidth = currentLineWidth;
+        currentLineWidth = 0;
+      }
+      currentLineWidth += (textObj.width || 0) + padding;
+    });
+    if (currentLineWidth > maxLineWidth) maxLineWidth = currentLineWidth;
+
+    let currentLeft = rotatedX - (maxLineWidth / 2);
+    const startX = currentLeft; // 改行時のリセット用位置
+
+    // 各テキストパーツを配置
+    parts.textElements.forEach((textObj: fabric.Object) => {
       if ((textObj as any)._isNewLine) {
         currentLeft = startX;
       }
 
+      // 配置の基準を top で揃えて計算を安定させる
       textObj.set({
         scaleX: 1,
         scaleY: 1,
+        originY: 'top', 
         left: currentLeft,
         top: rotatedY + ((textObj as any)._customTopOffset || 0)
       });
       textObj.setCoords();
 
+      // 本来のITextの挙動を維持するためセンターに戻す
+      textObj.originY = 'center';
+
       currentLeft += (textObj.width || 0) + padding;
     });
   };
-  
+
   // ★Undo/Redo用：現在のキャンバスの状態を丸ごとセーブする関数
   const saveHistory = (fCanvas: fabric.Canvas) => {
     if (isRespondingToHistory.current) return;
@@ -585,9 +586,11 @@ const FloorPlanEditor = () => {
       left: x, top: y, originX: 'center', originY: 'center', objectCaching: false,
     });
 
+   // --- 2. 各テキストパーツの生成 ---
     const textElements: fabric.Object[] = [];
     const textGroupParts: any = {};
 
+    // 左揃えベースの基本スタイル
     const baseStyle = { 
       fontSize: 12, fontWeight: 'bold' as const, fill: color, 
       originX: 'left' as const, originY: 'center' as const,
@@ -595,55 +598,44 @@ const FloorPlanEditor = () => {
       lockScalingX: true, lockScalingY: true, lockRotation: true
     };
 
+    // 固定ラベル（完全にクリックをスルー）
     const labelStyle = { ...baseStyle, selectable: false, evented: false };
+
+    // 数字部分（ダブルクリックを検知）
     const numStyle = { ...baseStyle, backgroundColor: 'rgba(255, 255, 255, 0.85)', selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
 
-    if (dimMode === 'W') {
-      const lblW = new fabric.IText('W: ', labelStyle);
-      const numW = new fabric.IText('00', numStyle);
-      textElements.push(lblW, numW);
-      textGroupParts.numW = numW;
-    } 
-    else if (dimMode === 'W_H') {
-      const lblW = new fabric.IText('W: ', labelStyle);
-      const numW = new fabric.IText('00', numStyle);
+    // 1行目 (W): 常に0px
+    const lblW = new fabric.IText('W: ', labelStyle);
+    const numW = new fabric.IText('00', numStyle);
+    textElements.push(lblW, numW);
+    textGroupParts.numW = numW;
+
+    // 2行目 (D): W_D または W_D_H のときは 18px 下げる
+    if (dimMode === 'W_D' || dimMode === 'W_D_H') {
+      const lblD = new fabric.IText('D: ', labelStyle);
+      const numD = new fabric.IText('00', numStyle);
+      
+      (lblD as any)._isNewLine = true;
+      (lblD as any)._customTopOffset = 18;
+      (numD as any)._customTopOffset = 18;
+
+      textElements.push(lblD, numD);
+      textGroupParts.numD = numD;
+    }
+
+    // 3行目 (H): モードによって下げる位置（オフセット）を動的に変える
+    if (dimMode === 'W_H' || dimMode === 'W_D_H') {
       const lblH = new fabric.IText('H: ', labelStyle);
       const numH = new fabric.IText('00', numStyle);
       
-      (lblH as any)._isNewLine = true;
-      (lblH as any)._customTopOffset = 16;
-      (numH as any)._customTopOffset = 16;
-
-      textElements.push(lblW, numW, lblH, numH);
-      textGroupParts.numW = numW;
-      textGroupParts.numH = numH;
-    } 
-    else if (dimMode === 'W_D') {
-      const lblW = new fabric.IText('W: ', labelStyle);
-      const numW = new fabric.IText('00', numStyle);
-      const slash = new fabric.IText(' / ', labelStyle);
-      const lblD = new fabric.IText('D: ', labelStyle);
-      const numD = new fabric.IText('00', numStyle);
-      textElements.push(lblW, numW, slash, lblD, numD);
-      textGroupParts.numW = numW;
-      textGroupParts.numD = numD;
-    } 
-    else if (dimMode === 'W_D_H') {
-      const lblW = new fabric.IText('W: ', labelStyle);
-      const numW = new fabric.IText('00', numStyle);
-      const slash = new fabric.IText(' / ', labelStyle);
-      const lblD = new fabric.IText('D: ', labelStyle);
-      const numD = new fabric.IText('00', numStyle);
-      const lblH = new fabric.IText('H: ', labelStyle);
-      const numH = new fabric.IText('00', numStyle);
+      // W_D_H なら3行目(36px)、W_H ならDがないので2行目(18px)にする
+      const hOffset = dimMode === 'W_D_H' ? 36 : 18;
 
       (lblH as any)._isNewLine = true;
-      (lblH as any)._customTopOffset = 16;
-      (numH as any)._customTopOffset = 16;
+      (lblH as any)._customTopOffset = hOffset;
+      (numH as any)._customTopOffset = hOffset;
 
-      textElements.push(lblW, numW, slash, lblD, numD, lblH, numH);
-      textGroupParts.numW = numW;
-      textGroupParts.numD = numD;
+      textElements.push(lblH, numH);
       textGroupParts.numH = numH;
     }
 
