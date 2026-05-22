@@ -191,6 +191,45 @@ const FloorPlanEditor = () => {
     canvas.requestRenderAll();
   };
 
+  // ★新機能：配置モードの切り替えおよび同一ボタン再クリック時の解除（トグル）を一括管理する関数
+  const handleDimModeChange = (targetMode: 'W' | 'W_D' | 'W_H' | 'W_D_H' | 'TEXT_ONLY' | 'ARROW_ONLY') => {
+    if (!canvas) return;
+
+    // 現在まさに「そのモードで配置待機中（オレンジ点滅）」なら、もう一度押されたので解除する
+    if (isPlacing && dimMode === targetMode) {
+      (canvas as any)._isPlacingMode = false;
+      (canvas as any)._currentDimMode = null;
+      setIsPlacing(false);
+      canvas.defaultCursor = 'default';
+
+      // 既存オブジェクトの選択可能状態を復元（ただし座布団ボックスなどの裏方パーツは除外）
+      canvas.getObjects().forEach(obj => {
+        if (!(obj as any)._parentGroup && !(obj as any)._isTextBoxContainer) {
+          obj.selectable = true;
+          obj.evented = true;
+        }
+      });
+      canvas.discardActiveObject();
+      canvas.renderAll();
+      return;
+    }
+
+    // 新しく配置モードを開始、または別のモードに切り替える処理
+    setDimMode(targetMode);
+    (canvas as any)._currentDimMode = targetMode;
+    (canvas as any)._isPlacingMode = true;
+    setIsPlacing(true);
+    canvas.defaultCursor = 'crosshair';
+
+    // 配置を邪魔しないように既存オブジェクトの操作イベントを一時的にロック
+    canvas.getObjects().forEach(obj => {
+      obj.selectable = false;
+      obj.evented = false;
+    });
+    canvas.discardActiveObject();
+    canvas.renderAll();
+  };
+  
   // ★新機能：選択しているオブジェクトのハイライト状態をスキャンしてボタンの色にフィードバックするヘルパー
   const updateButtonHighlightState = (fCanvas: fabric.Canvas) => {
     const active = fCanvas.getActiveObject() as any;
@@ -440,7 +479,8 @@ const FloorPlanEditor = () => {
           
           fabricCanvas.getObjects().forEach(obj => {
             if (!(obj as any)._parentGroup) {
-              if (obj !== activeObj) {
+              // 今配置を終えて入力待機中のテキストボックス、および座布団ボックス以外のオブジェクトのみを選択可能に戻す
+              if (obj !== activeObj && !(obj as any)._isTextBoxContainer) {
                 obj.selectable = true;
                 obj.evented = true;
               }
@@ -1189,84 +1229,42 @@ const FloorPlanEditor = () => {
         {/* モード選択ボタンの並び */}
         <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 text-sm font-medium">
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('W');
-              (canvas as any)._currentDimMode = 'W';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('W')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ↔ W
           </button>
           
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('W_D');
-              (canvas as any)._currentDimMode = 'W_D';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('W_D')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_D' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ✛ W×D
           </button>
           
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('W_H');
-              (canvas as any)._currentDimMode = 'W_H';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('W_H')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_H' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ↔ W×H
           </button>
           
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('W_D_H');
-              (canvas as any)._currentDimMode = 'W_D_H';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('W_D_H')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'W_D_H' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'W_D_H' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ✛ W×D×H
           </button>
           
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('TEXT_ONLY');
-              (canvas as any)._currentDimMode = 'TEXT_ONLY';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('TEXT_ONLY')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'TEXT_ONLY' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'TEXT_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             テキスト
           </button>
           
           <button 
-            onClick={() => {
-              if (!canvas) return;
-              setDimMode('ARROW_ONLY');
-              (canvas as any)._currentDimMode = 'ARROW_ONLY';
-              (canvas as any)._isPlacingMode = true;
-              setIsPlacing(true);
-              canvas.defaultCursor = 'crosshair';
-            }} 
+            onClick={() => handleDimModeChange('ARROW_ONLY')} 
             className={`px-3 py-1.5 rounded-md transition ${dimMode === 'ARROW_ONLY' && isPlacing ? 'bg-amber-500 text-white animate-pulse' : dimMode === 'ARROW_ONLY' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
           >
             ➔
