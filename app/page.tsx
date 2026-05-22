@@ -530,23 +530,38 @@ const FloorPlanEditor = () => {
         if ((e.ctrlKey || e.metaKey) && key === 'c') {
           if (!active) return;
 
-          let targetGroup = active;
+          let targetObj = active;
           if ((active as any)._parentGroup) {
-            targetGroup = (active as any)._parentGroup;
+            targetObj = (active as any)._parentGroup;
           }
 
-          if (targetGroup.type === 'group') {
+          // A. 寸法線グループまたは片方矢印の場合
+          if (targetObj.type === 'group') {
             e.preventDefault();
-            
-            const groupData = targetGroup.toObject(['_dimMode', '_dimensionParts']);
-            const textDataArray = (targetGroup as any)._dimensionParts.textElements.map((t: any) => {
+            const groupData = targetObj.toObject(['_dimMode', '_dimensionParts']);
+            const textDataArray = (targetObj as any)._dimensionParts.textElements.map((t: any) => {
               return t.toObject(['_isNewLine', '_customTopOffset']);
             });
 
             copiedJsonRef.current = JSON.stringify({
+              isGroup: true,
               group: groupData,
               texts: textDataArray,
-              dimMode: (targetGroup as any)._dimMode
+              dimMode: (targetObj as any)._dimMode
+            });
+          }
+          
+          // B. ★決定版：型チェックをバイパスしてエラーを完全消去するコピー処理
+          else if (targetObj instanceof fabric.IText && !(targetObj as any)._isPropertyTitle) {
+            e.preventDefault();
+            
+            // targetObj を一度 any にキャストしてから toObject を呼ぶことで、
+            // Fabric v6 の厳格すぎる型チェックを完全に無効化し、エラーを消滅させます。
+            const textData = (targetObj as any).toObject(['backgroundColor']);
+            
+            copiedJsonRef.current = JSON.stringify({
+              isGroup: false,
+              textData: textData
             });
           }
           return;
@@ -557,9 +572,56 @@ const FloorPlanEditor = () => {
           e.preventDefault();
 
           saveHistory(fabricCanvas);
-
           const clipboardData = JSON.parse(copiedJsonRef.current);
 
+          // B. ★修正：型エラーを完全回避した単体テキストボックスのペースト処理
+          if (clipboardData.isGroup === false) {
+            (async () => {
+              // ITextとして明示的に復元します
+              const clonedText = await fabric.IText.fromObject(clipboardData.textData) as fabric.IText;
+              
+              clonedText.set({
+                left: (clipboardData.textData.left || 0) + 20,
+                top: (clipboardData.textData.top || 0) + 20,
+                selectable: true,
+                evented: true,
+              });
+              
+              // ★修正：型エラーを防ぐため (clonedText as any) を用いて安全にイベントをバインドします
+              (clonedText as any).onKeyDown = (eEvent: KeyboardEvent) => {
+                if (eEvent.key === 'Enter') {
+                  if (eEvent.shiftKey) {
+                    (clonedText as any).insertChars('\n');
+                    clonedText.canvas?.requestRenderAll();
+                  } else {
+                    eEvent.preventDefault();
+                    (clonedText as any).exitEditing();
+                  }
+                  return;
+                }
+                // プロトタイプチェーンの呼び出しもanyで安全に実行
+                (fabric.IText.prototype as any).onKeyDown.call(clonedText, eEvent);
+              };
+
+              // ★修正：イベント名とコールバックをまとめて any にキャストすることで、TypeScriptの厳格なイベント型衝突を完全に回避します
+              (clonedText as any).on('editing:exited', () => {
+                if (clonedText.text.trim() === '') clonedText.text = 'テキスト入力';
+                saveHistory(fabricCanvas);
+                fabricCanvas.requestRenderAll();
+              });
+
+              fabricCanvas.add(clonedText);
+              fabricCanvas.discardActiveObject();
+              fabricCanvas.setActiveObject(clonedText);
+              
+              clonedText.setCoords(); // ハンドル位置の即時強制計算
+              saveHistory(fabricCanvas);
+              fabricCanvas.requestRenderAll();
+            })();
+            return;
+          }
+
+          // A. 既存の寸法線グループのペースト処理（元のロジックを完全維持）
           (async () => {
             const clonedGroup = await fabric.Group.fromObject(clipboardData.group);
             const dimMode = clipboardData.dimMode;
@@ -571,7 +633,7 @@ const FloorPlanEditor = () => {
               evented: true,
               objectCaching: false
             });
-            (clonedGroup as any).id = Math.random().toString(36).substring(2, 9); // コピペ時に新規一意のIDを設定
+            (clonedGroup as any).id = Math.random().toString(36).substring(2, 9);
 
             const clonedParts: any = {};
             const newTextElements: fabric.Object[] = [];
@@ -590,18 +652,7 @@ const FloorPlanEditor = () => {
               const isNum = tData.text !== 'W: ' && tData.text !== ' / ' && tData.text !== 'D: ' && tData.text !== 'H: ';
               
               clonedText.set({
-                originX: 'left',
-                originY: 'center',
-                hasControls: false,
-                hasBorders: false,
-                objectCaching: false,
-                selectable: false,
-                evented: isNum,
-                lockMovementX: true,
-                lockMovementY: true,
-                lockScalingX: true,
-                lockScalingY: true,
-                lockRotation: true
+                originX: 'left', originY: 'center', hasControls: false, hasBorders: false, objectCaching: false, selectable: false, evented: isNum, lockMovementX: true, lockMovementY: true, lockScalingX: true, lockScalingY: true, lockRotation: true
               });
               
               (clonedText as any)._parentGroup = clonedGroup;
@@ -616,14 +667,10 @@ const FloorPlanEditor = () => {
             clonedParts.textElements = newTextElements;
 
             if (dimMode === 'W' || dimMode === 'W_H') {
-              clonedGroup.setControlsVisibility({
-                mt: false, mb: false, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true,
-              });
+              clonedGroup.setControlsVisibility({ mt: false, mb: false, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true });
               clonedGroup.lockScalingY = true;
             } else {
-              clonedGroup.setControlsVisibility({
-                mt: true, mb: true, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true,
-              });
+              clonedGroup.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, bl: false, br: false, tl: false, tr: false, mtr: true });
             }
 
             fabricCanvas.add(clonedGroup);
@@ -671,6 +718,7 @@ const FloorPlanEditor = () => {
             fabricCanvas.discardActiveObject();
             fabricCanvas.setActiveObject(clonedGroup);
             
+            clonedGroup.setCoords(); // ★ハンドル位置の即時強制計算
             saveHistory(fabricCanvas);
             fabricCanvas.requestRenderAll();
           })();
@@ -965,17 +1013,21 @@ const FloorPlanEditor = () => {
     fCanvas.requestRenderAll();
   };
   
-  const rotateSelected = (angleStep: number) => {
+ const rotateSelected = (angleStep: number) => {
     if (!canvas) return;
     const active = canvas.getActiveObject() as any;
     if (active) {
       const newAngle = (active.angle + angleStep) % 360;
       active.set('angle', newAngle);
+      
+      // グループ（寸法線・片方矢印）だった場合、連動するテキスト・座布団の位置を同期
       if (active.type === 'group' && active._dimensionParts) {
         updateCombinedTextPosition(active, active._dimensionParts);
       }
+      
+      active.setCoords(); // ★超重要：回転後の外枠ハンドル位置を即座に再計算・同期させる
       saveHistory(canvas); 
-      canvas.renderAll();
+      canvas.requestRenderAll(); // キャンバスの強制最描画
     }
   };
 
