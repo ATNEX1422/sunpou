@@ -463,7 +463,7 @@ const FloorPlanEditor = () => {
         const currentMode = (fabricCanvas as any)._currentDimMode || 'W';
 
         if (currentMode === 'TEXT_ONLY') {
-          createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#000000');
+          createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#ef4444');
         } else if (currentMode === 'ARROW_ONLY') {
           createSingleArrow(fabricCanvas, pointer.x, pointer.y, '#ef4444');
         } else {
