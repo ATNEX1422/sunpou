@@ -57,36 +57,57 @@ export default function App() {
     'id' 
   ];
 
-  // 共通ヘルパー：すべてのテキストを「各行左揃え」のまま、寸法線の少し下に美しく縦並びにするロジック、および個別座布団の連動
+  // 共通ヘルパー：すべてのテキストを「各行左揃え」のまま、寸法線の周りに美しく配置するロジック、および個別座布団の連動
   const updateCombinedTextPosition = (target: any, parts: any) => {
     if (!parts || !parts.textElements) return;
 
     const angleRad = (target.angle || 0) * (Math.PI / 180);
     const currentDimMode = (target as any)._dimMode || 'W';
 
-    // 1. 寸法線の形状に合わせて初期配置の基準点を決める
-    let offsetX = 0;
-    let offsetY = 0;
+    // 寸法線の形状に合わせて初期配置 of 基準点を決める
+    let rotatedX = target.left!;
+    let rotatedY = target.top!;
 
-    // ★クリアランス改善：寸法線が極端に縮小された際、矢印（Triangle）とテキストが重なるのを物理的に防ぐための最小オフセット設定（中心からの最小距離）
-    const minCenterOffsetW = 32; // W、W_Hモード時の上方向への最小オフセット距離
-    const minCenterOffsetX = 45; // W_D、W_D_Hなどの十字モード時の右方向への最小オフセット距離
-    const minCenterOffsetY = 45; // W_D、W_D_Hなどの十字モード時の上方向への最小オフセット距離
+    // クリアランス設定：寸法線が極端に縮小された際、矢印（Triangle）とテキストが重なるのを物理的に防ぐための最小オフセット設定（中心からの最小距離）
+    const minCenterOffsetW = 32; // Wモード時の上方向への最小オフセット距離
+    const minCenterOffsetX = 45; // 十字モード時の右方向への最小オフセット距離
+    const minCenterOffsetY = 45; // 十字モード時の上方向への最小オフセット距離
 
-    if (currentDimMode === 'W' || currentDimMode === 'W_H') {
-      offsetX = 0;
-      const calculatedOffsetY = (target.height / 2) + 24;
-      offsetY = -Math.max(calculatedOffsetY, minCenterOffsetW); 
+    if (currentDimMode === 'W') {
+      // ★Wモード：ご要望の「横長楕円軌道」を適用（左右はそのまま離し、上下は近くに寄せる）
+      const baseDistance = (target.height / 2);
+      
+      // 左右の頂点はそのまま (長半径 a = 元の計算と同じ)
+      const a = Math.max(baseDistance + 24, minCenterOffsetW);
+      // 上下の軌道を短くして横長楕円に (短半径 b = 近くに配置)
+      const b = Math.max(baseDistance + 10, 16); 
+
+      // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
+      const dx = a * Math.sin(angleRad);
+      const dy = -b * Math.cos(angleRad);
+
+      rotatedX = target.left! + dx;
+      rotatedY = target.top! + dy;
+    } else if (currentDimMode === 'W_H') {
+      // ★W_Hモード：楕円軌道にせず、ご要望通り「元の円形軌道」をベースにしつつ、上下をほんの少し近づける
+      let offsetX = 0;
+      // 24px から 16px に変更して、ほんの少し寸法線に近接させる
+      const calculatedOffsetY = (target.height / 2) + 16;
+      // 最小クリアランスも 24px に下げて接近しやすくする
+      let offsetY = -Math.max(calculatedOffsetY, 24); 
+
+      rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
+      rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
     } else {
       // 十字や複数軸モード（W_D, W_D_Hなど）の時、矢印の先端（target.width / 2）からさらに外側へ離すパディング
       const paddingFromArrow = 16;
       
-      offsetX = Math.max((target.width / 2) + paddingFromArrow, minCenterOffsetX);
-      offsetY = -Math.max((target.height / 2) + paddingFromArrow, minCenterOffsetY);
+      const offsetX = Math.max((target.width / 2) + paddingFromArrow, minCenterOffsetX);
+      const offsetY = -Math.max((target.height / 2) + paddingFromArrow, minCenterOffsetY);
+      
+      rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
+      rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
     }
-
-    const rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
-    const rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
 
     // 縦に並んだテキストの最長幅（Wの行）を基準にして開始位置を左にずらす
     let maxLineWidth = 0;
@@ -185,6 +206,7 @@ export default function App() {
 
     // 現在の状態を反転
     const nextState = !isSelectedHasHighlight;
+    const fabricObj = (window as any).fabric;
 
     activeObjects.forEach((obj: any) => {
       // 物件名テキストボックスはスキップ
@@ -208,7 +230,7 @@ export default function App() {
           if (nextState) {
             // ハイライトを有効化（無ければ座布団 Rect を生成）
             if (!bgRect) {
-              bgRect = new fabric.Rect({
+              bgRect = new fabricObj.Rect({
                 selectable: false,
                 evented: false,
                 originX: 'center',
@@ -1106,19 +1128,19 @@ export default function App() {
       });
     };
 
-    if (dimMode === 'W') setupSequence(textGroupParts.numW);
+    if (dimMode === 'W') setupSequence(textGroupParts.numW, null);
     else if (dimMode === 'W_H') {
       setupSequence(textGroupParts.numW, textGroupParts.numH);
-      setupSequence(textGroupParts.numH);
+      setupSequence(textGroupParts.numH, null);
     } 
     else if (dimMode === 'W_D') {
       setupSequence(textGroupParts.numW, textGroupParts.numD);
-      setupSequence(textGroupParts.numD);
+      setupSequence(textGroupParts.numD, null);
     } 
     else if (dimMode === 'W_D_H') {
       setupSequence(textGroupParts.numW, textGroupParts.numD);
       setupSequence(textGroupParts.numD, textGroupParts.numH);
-      setupSequence(textGroupParts.numH);
+      setupSequence(textGroupParts.numH, null);
     }
 
     if (dimMode === 'W' || dimMode === 'W_H') {
