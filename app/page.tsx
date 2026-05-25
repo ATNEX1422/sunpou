@@ -1,7 +1,6 @@
 //消すな！！！
-//セキュリティ エラー →　Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+//セキュリティ エラー → Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 //消すな！！！
-
 
 "use client";
 
@@ -127,7 +126,7 @@ const FloorPlanEditor = () => {
     }
   };
 
-  // ★新機能：選択中のオブジェクトに対して個別にハイライトをオンオフする関数
+  // ★機能：選択中のオブジェクトに対して個別にハイライトをオンオフする関数
   const toggleSelectedObjectsHighlight = () => {
     if (!canvas) return;
     const activeObjects = canvas.getActiveObjects();
@@ -191,7 +190,7 @@ const FloorPlanEditor = () => {
     canvas.requestRenderAll();
   };
 
-  // ★新機能：配置モードの切り替えおよび同一ボタン再クリック時の解除（トグル）を一括管理する関数
+  // ★機能：配置モードの切り替えおよび同一ボタン再クリック時の解除（トグル）を一括管理する関数
   const handleDimModeChange = (targetMode: 'W' | 'W_D' | 'W_H' | 'W_D_H' | 'TEXT_ONLY' | 'ARROW_ONLY') => {
     if (!canvas) return;
 
@@ -229,8 +228,8 @@ const FloorPlanEditor = () => {
     canvas.discardActiveObject();
     canvas.renderAll();
   };
-  
-  // ★新機能：選択しているオブジェクトのハイライト状態をスキャンしてボタンの色にフィードバックするヘルパー
+
+  // ★機能：選択しているオブジェクトのハイライト状態をスキャンしてボタンの色にフィードバックするヘルパー
   const updateButtonHighlightState = (fCanvas: fabric.Canvas) => {
     const active = fCanvas.getActiveObject() as any;
     if (!active || active._isPropertyTitle) {
@@ -403,6 +402,13 @@ const FloorPlanEditor = () => {
 
       target.set({ width: currentGroupWidth, height: currentGroupHeight, scaleX: 1, scaleY: 1 });
       
+      // ★追加：親の伸縮によって子が不自然に歪んで引き伸ばされるのを防ぐため、子の比率を綺麗にリセット
+      if (parts.textElements) {
+        parts.textElements.forEach((t: any) => {
+          t.set({ scaleX: 1, scaleY: 1 });
+        });
+      }
+
       updateCombinedTextPosition(target, parts);
       target.setCoords();
       fabricCanvas.requestRenderAll();
@@ -463,7 +469,7 @@ const FloorPlanEditor = () => {
         const currentMode = (fabricCanvas as any)._currentDimMode || 'W';
 
         if (currentMode === 'TEXT_ONLY') {
-          createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#000000');
+          createTextBoxOnly(fabricCanvas, pointer.x, pointer.y, '#ef4444');
         } else if (currentMode === 'ARROW_ONLY') {
           createSingleArrow(fabricCanvas, pointer.x, pointer.y, '#ef4444');
         } else {
@@ -551,12 +557,9 @@ const FloorPlanEditor = () => {
             });
           }
           
-          // B. ★決定版：型チェックをバイパスしてエラーを完全消去するコピー処理
+          // B. ★決定版：型チェックをバイパスしてエラーを完全消去する単体テキストコピー処理
           else if (targetObj instanceof fabric.IText && !(targetObj as any)._isPropertyTitle) {
             e.preventDefault();
-            
-            // targetObj を一度 any にキャストしてから toObject を呼ぶことで、
-            // Fabric v6 の厳格すぎる型チェックを完全に無効化し、エラーを消滅させます。
             const textData = (targetObj as any).toObject(['backgroundColor']);
             
             copiedJsonRef.current = JSON.stringify({
@@ -574,10 +577,9 @@ const FloorPlanEditor = () => {
           saveHistory(fabricCanvas);
           const clipboardData = JSON.parse(copiedJsonRef.current);
 
-          // B. ★修正：型エラーを完全回避した単体テキストボックスのペースト処理
+          // B. ★修正：縦横比を完全固定しつつ型エラーを完全回避した単体テキストボックスのペースト処理
           if (clipboardData.isGroup === false) {
             (async () => {
-              // ITextとして明示的に復元します
               const clonedText = await fabric.IText.fromObject(clipboardData.textData) as fabric.IText;
               
               clonedText.set({
@@ -585,9 +587,16 @@ const FloorPlanEditor = () => {
                 top: (clipboardData.textData.top || 0) + 20,
                 selectable: true,
                 evented: true,
+                lockUniScaling: true, // 縦横比固定の強制オン
+              });
+
+              // コントロールハンドルを四隅の拡大縮小と上部回転のみに制限
+              clonedText.setControlsVisibility({
+                mt: false, mb: false, ml: false, mr: false, 
+                bl: true, br: true, tl: true, tr: true, 
+                mtr: true 
               });
               
-              // ★修正：型エラーを防ぐため (clonedText as any) を用いて安全にイベントをバインドします
               (clonedText as any).onKeyDown = (eEvent: KeyboardEvent) => {
                 if (eEvent.key === 'Enter') {
                   if (eEvent.shiftKey) {
@@ -599,11 +608,9 @@ const FloorPlanEditor = () => {
                   }
                   return;
                 }
-                // プロトタイプチェーンの呼び出しもanyで安全に実行
                 (fabric.IText.prototype as any).onKeyDown.call(clonedText, eEvent);
               };
 
-              // ★修正：イベント名とコールバックをまとめて any にキャストすることで、TypeScriptの厳格なイベント型衝突を完全に回避します
               (clonedText as any).on('editing:exited', () => {
                 if (clonedText.text.trim() === '') clonedText.text = 'テキスト入力';
                 saveHistory(fabricCanvas);
@@ -621,7 +628,7 @@ const FloorPlanEditor = () => {
             return;
           }
 
-          // A. 既存の寸法線グループのペースト処理（元のロジックを完全維持）
+          // A. 既存の寸法線グループのペースト処理
           (async () => {
             const clonedGroup = await fabric.Group.fromObject(clipboardData.group);
             const dimMode = clipboardData.dimMode;
@@ -652,8 +659,20 @@ const FloorPlanEditor = () => {
               const isNum = tData.text !== 'W: ' && tData.text !== ' / ' && tData.text !== 'D: ' && tData.text !== 'H: ';
               
               clonedText.set({
-                originX: 'left', originY: 'center', hasControls: false, hasBorders: false, objectCaching: false, selectable: false, evented: isNum, lockMovementX: true, lockMovementY: true, lockScalingX: true, lockScalingY: true, lockRotation: true
+                originX: 'left', 
+                originY: 'center', 
+                hasControls: true, 
+                hasBorders: true, 
+                objectCaching: false, 
+                selectable: true, // ★寸法に付随する数字も単独選択コピペを許可
+                evented: isNum, 
+                lockMovementX: false, // ★移動微調整を許可
+                lockMovementY: false,
+                lockUniScaling: true, // ★縦横比を固定
+                borderColor: '#3b82f6'
               });
+
+              clonedText.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false, bl: true, br: true, tl: true, tr: true, mtr: true });
               
               (clonedText as any)._parentGroup = clonedGroup;
               (clonedText as any)._isNewLine = tData._isNewLine;
@@ -718,7 +737,7 @@ const FloorPlanEditor = () => {
             fabricCanvas.discardActiveObject();
             fabricCanvas.setActiveObject(clonedGroup);
             
-            clonedGroup.setCoords(); // ★ハンドル位置の即時強制計算
+            clonedGroup.setCoords(); // ハンドル位置の即時強制計算
             saveHistory(fabricCanvas);
             fabricCanvas.requestRenderAll();
           })();
@@ -841,25 +860,38 @@ const FloorPlanEditor = () => {
       fill: color, 
       originX: 'center' as const, 
       originY: 'center' as const,
-      hasControls: false, 
-      hasBorders: false, 
+      hasControls: true, 
+      hasBorders: true, 
       objectCaching: false,
-      lockScalingX: true, 
-      lockScalingY: true, 
-      lockRotation: true,
+      lockScalingX: false, 
+      lockScalingY: false, 
+      lockRotation: false,
       backgroundColor: 'transparent' // 共通Rect座布団で包み込むためテキスト本来の背景は透明化
     };
 
-    const labelStyle = { ...baseStyle, selectable: false, evented: false };
-    const numStyle = { ...baseStyle, selectable: false, evented: true, lockMovementX: true, lockMovementY: true };
+    const labelStyle = { ...baseStyle, selectable: false, evented: false, hasControls: false, hasBorders: false };
+    
+    // ★修正：寸法線に連動する数字テキストも選択コピペ・縦横比固定拡大縮小に対応
+    const numStyle = { 
+      ...baseStyle, 
+      selectable: true, 
+      evented: true, 
+      lockMovementX: false, 
+      lockMovementY: false, 
+      lockUniScaling: true, 
+      borderColor: '#3b82f6' 
+    };
+
     const lblW = new fabric.IText('W: ', labelStyle);
     const numW = new fabric.IText('00', numStyle);
+    numW.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false, bl: true, br: true, tl: true, tr: true, mtr: true });
     textElements.push(lblW, numW);
     textGroupParts.numW = numW;
 
     if (dimMode === 'W_D' || dimMode === 'W_D_H') {
       const lblD = new fabric.IText('D: ', labelStyle);
       const numD = new fabric.IText('00', numStyle);
+      numD.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false, bl: true, br: true, tl: true, tr: true, mtr: true });
       
       (lblD as any)._isNewLine = true;
       (lblD as any)._customTopOffset = 18;
@@ -872,6 +904,7 @@ const FloorPlanEditor = () => {
     if (dimMode === 'W_H' || dimMode === 'W_D_H') {
       const lblH = new fabric.IText('H: ', labelStyle);
       const numH = new fabric.IText('00', numStyle);
+      numH.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false, bl: true, br: true, tl: true, tr: true, mtr: true });
       
       const hOffset = dimMode === 'W_D_H' ? 36 : 18;
 
@@ -936,12 +969,7 @@ const FloorPlanEditor = () => {
 
       currentNum.on('editing:exited', () => {
         group.selectable = true;
-        
-        if (currentNum.text.trim() === '') {
-          currentNum.text = '00';
-        } else {
-          currentNum.text = currentNum.text.trim();
-        }
+        currentNum.text = currentNum.text.trim() === '' ? '00' : currentNum.text.trim();
         
         currentNum.setCoords();
         updateCombinedTextPosition(group, dimensionParts);
@@ -951,7 +979,7 @@ const FloorPlanEditor = () => {
 
         if (nextNum) {
           setTimeout(() => {
-            nextNum.selectable = false;
+            nextNum.selectable = true;
             nextNum.evented = true; 
             
             fCanvas.setActiveObject(nextNum);
@@ -963,7 +991,7 @@ const FloorPlanEditor = () => {
           if (dimensionParts && dimensionParts.textElements) {
             dimensionParts.textElements.forEach((t: any) => {
               if (t.text !== 'W: ' && t.text !== ' / ' && t.text !== 'D: ' && t.text !== 'H: ') {
-                t.selectable = false;
+                t.selectable = true;
                 t.evented = true;
               }
             });
@@ -1013,178 +1041,26 @@ const FloorPlanEditor = () => {
     fCanvas.requestRenderAll();
   };
   
- const rotateSelected = (angleStep: number) => {
-    if (!canvas) return;
-    const active = canvas.getActiveObject() as any;
-    if (active) {
-      const newAngle = (active.angle + angleStep) % 360;
-      active.set('angle', newAngle);
-      
-      // グループ（寸法線・片方矢印）だった場合、連動するテキスト・座布団の位置を同期
-      if (active.type === 'group' && active._dimensionParts) {
-        updateCombinedTextPosition(active, active._dimensionParts);
-      }
-      
-      active.setCoords(); // ★超重要：回転後の外枠ハンドル位置を即座に再計算・同期させる
-      saveHistory(canvas); 
-      canvas.requestRenderAll(); // キャンバスの強制最描画
-    }
-  };
-
-  const changeSelectedColor = (newColor: string) => {
-    if (!canvas) return;
-
-    canvas.getActiveObjects().forEach((obj: any) => {
-      if (obj && obj._dimensionParts) {
-        const parts = obj._dimensionParts;
-        if (parts.wLine) parts.wLine.set('stroke', newColor);
-        if (parts.wLeft) parts.wLeft.set('fill', newColor);
-        if (parts.wRight) parts.wRight.set('fill', newColor);
-        if (parts.dLine) parts.dLine.set('stroke', newColor);
-        if (parts.dTop) parts.dTop.set('fill', newColor);
-        if (parts.dBottom) parts.dBottom.set('fill', newColor);
-
-        if (parts.textElements) {
-          parts.textElements.forEach((textObj: any) => {
-            textObj.set('fill', newColor);
-          });
-        }
-      }
-      else if (obj && obj._parentGroup) {
-        const parent = obj._parentGroup;
-        if (parent._dimensionParts && parent._dimensionParts.textElements) {
-          parent._dimensionParts.textElements.forEach((textObj: any) => {
-            textObj.set('fill', newColor);
-          });
-        }
-        const parentParts = parent._dimensionParts;
-        if (parentParts) {
-          if (parentParts.wLine) parentParts.wLine.set('stroke', newColor);
-          if (parentParts.wLeft) parentParts.wLeft.set('fill', newColor);
-          if (parentParts.wRight) parentParts.wRight.set('fill', newColor);
-          if (parentParts.dLine) parentParts.dLine.set('stroke', newColor);
-          if (parentParts.dTop) parentParts.dTop.set('fill', newColor);
-          if (parentParts.dBottom) parentParts.dBottom.set('fill', newColor);
-        }
-      }
-      else if (obj) {
-        if (obj.type === 'i-text') {
-          obj.set('fill', newColor);
-        } else if (obj.type === 'group') {
-          obj.getObjects().forEach((child: any) => {
-            if (child.stroke) child.set('stroke', newColor);
-            if (child.fill) child.set('fill', newColor);
-          });
-        }
-      }
-    });
-
-    saveHistory(canvas); 
-    canvas.requestRenderAll();
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !canvas) return;
-
-    const reader = new FileReader();
-    reader.onload = async (f) => {
-      // 画像差し替え時に、古い物件名ボックスと合わせて寸法線の座布団 Rect も一旦全クリア
-      canvas.getObjects().forEach((obj: any) => {
-        if (obj && (obj._isPropertyTitle || obj._isTextBoxContainer)) {
-          canvas.remove(obj);
-        }
-      });
-
-      const img = await fabric.FabricImage.fromURL(f.target?.result as string);
-      const scale = Math.min(canvas.width! / img.width!, canvas.height! / img.height!);
-      img.scale(scale < 1 ? scale : 1);
-      img.set({ left: canvas.width! / 2, top: canvas.height! / 2, originX: 'center', originY: 'center' });
-      canvas.backgroundImage = img;
-      
-      undoStack.current = [];
-      redoStack.current = [];
-
-      const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
-        fontSize: 14,
-        fontWeight: '500',
-        fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
-        fill: '#1f2937', 
-        backgroundColor: 'rgba(255, 255, 255, 0.9)', 
-        padding: 6,
-        originX: 'right', 
-        originY: 'bottom', 
-        left: canvas.width! - 20, 
-        top: canvas.height! - 20, 
-        hasControls: false, 
-        hasBorders: true,
-        borderColor: '#3b82f6', 
-        cornerSize: 0,
-        lockMovementX: false, 
-        lockMovementY: false,
-      });
-
-      (propertyTitle as any)._isPropertyTitle = true;
-
-      propertyTitle.onKeyDown = (eEvent: KeyboardEvent) => {
-        if (eEvent.key === 'Enter') {
-          if (eEvent.shiftKey) {
-            (propertyTitle as any).insertChars('\n');
-            propertyTitle.canvas?.requestRenderAll();
-            return;
-          } else {
-            eEvent.preventDefault();
-            propertyTitle.exitEditing(); 
-            return;
-          }
-        }
-        fabric.IText.prototype.onKeyDown.call(propertyTitle, eEvent);
-      };
-
-      canvas.getObjects().forEach((obj) => {
-        if ((obj as any)._parentGroup) return;
-        canvas.bringObjectToFront(obj);
-        obj.selectable = true;
-        obj.evented = true;
-      });
-
-      canvas.add(propertyTitle);
-
-      // 画像の裏に回り込まないよう、寸法線座布団を綺麗なレイアウト位置で再構築・引き上げ
-      canvas.getObjects().forEach((obj: any) => {
-        if (obj.type === 'group' && obj._dimensionParts) {
-          updateCombinedTextPosition(obj, obj._dimensionParts);
-        }
-      });
-
-      saveHistory(canvas);
-      
-      canvas.discardActiveObject();
-      canvas.setActiveObject(propertyTitle);
-      canvas.renderAll();
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // ★追加：テキストボックスのみを配置する関数（フォントサイズを寸法線と同じ12pxに統一）
-  const createTextBoxOnly = (fCanvas: fabric.Canvas, x: number, y: number, color: string = '#000000') => {
+  // ★機能：テキストボックスのみを配置する関数（縦横比固定での拡大縮小に最初からガッチリ制限）
+  const createTextBoxOnly = (fCanvas: fabric.Canvas, x: number, y: number, color: string = '#ef4444') => {
     const textObj = new fabric.IText('テキスト入力', {
       left: x,
       top: y,
-      ...TEXT_COMMON_STYLE, // ★寸法線と全く同じフォント＆サイズ（12px）を流用
+      ...TEXT_COMMON_STYLE,
       fill: color,
-      backgroundColor: 'transparent', // 初期状態は透明背景
+      backgroundColor: 'transparent',
       padding: 4,
       originX: 'center',
       originY: 'center',
       hasControls: true, 
       hasBorders: true,
       borderColor: '#3b82f6',
+      lockUniScaling: true, // 縦横比固定
     });
 
     textObj.setControlsVisibility({
       mt: false, mb: false, ml: false, mr: false, 
-      bl: false, br: false, tl: false, tr: false, 
+      bl: true, br: true, tl: true, tr: true, 
       mtr: true, 
     });
 
@@ -1272,6 +1148,156 @@ const FloorPlanEditor = () => {
     fCanvas.requestRenderAll();
   };
 
+  const rotateSelected = (angleStep: number) => {
+    if (!canvas) return;
+    const active = canvas.getActiveObject() as any;
+    if (active) {
+      const newAngle = (active.angle + angleStep) % 360;
+      active.set('angle', newAngle);
+      
+      if (active.type === 'group' && active._dimensionParts) {
+        updateCombinedTextPosition(active, active._dimensionParts);
+      }
+      
+      active.setCoords(); // ★超重要：回転後の外枠ハンドル選択枠を即座に再計算
+      saveHistory(canvas); 
+      canvas.requestRenderAll();
+    }
+  };
+
+  const changeSelectedColor = (newColor: string) => {
+    if (!canvas) return;
+
+    canvas.getActiveObjects().forEach((obj: any) => {
+      if (obj && obj._dimensionParts) {
+        const parts = obj._dimensionParts;
+        if (parts.wLine) parts.wLine.set('stroke', newColor);
+        if (parts.wLeft) parts.wLeft.set('fill', newColor);
+        if (parts.wRight) parts.wRight.set('fill', newColor);
+        if (parts.dLine) parts.dLine.set('stroke', newColor);
+        if (parts.dTop) parts.dTop.set('fill', newColor);
+        if (parts.dBottom) parts.dBottom.set('fill', newColor);
+
+        if (parts.textElements) {
+          parts.textElements.forEach((textObj: any) => {
+            textObj.set('fill', newColor);
+          });
+        }
+      }
+      else if (obj && obj._parentGroup) {
+        const parent = obj._parentGroup;
+        if (parent._dimensionParts && parent._dimensionParts.textElements) {
+          parent._dimensionParts.textElements.forEach((textObj: any) => {
+            textObj.set('fill', newColor);
+          });
+        }
+        const parentParts = parent._dimensionParts;
+        if (parentParts) {
+          if (parentParts.wLine) parentParts.wLine.set('stroke', newColor);
+          if (parentParts.wLeft) parentParts.wLeft.set('fill', newColor);
+          if (parentParts.wRight) parentParts.wRight.set('fill', newColor);
+          if (parentParts.dLine) parentParts.dLine.set('stroke', newColor);
+          if (parentParts.dTop) parentParts.dTop.set('fill', newColor);
+          if (parentParts.dBottom) parentParts.dBottom.set('fill', newColor);
+        }
+      }
+      else if (obj) {
+        if (obj.type === 'i-text') {
+          obj.set('fill', newColor);
+        } else if (obj.type === 'group') {
+          obj.getObjects().forEach((child: any) => {
+            if (child.stroke) child.set('stroke', newColor);
+            if (child.fill) child.set('fill', newColor);
+          });
+        }
+      }
+    });
+
+    saveHistory(canvas); 
+    canvas.requestRenderAll();
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !canvas) return;
+
+    const reader = new FileReader();
+    reader.onload = async (f) => {
+      canvas.getObjects().forEach((obj: any) => {
+        if (obj && (obj._isPropertyTitle || obj._isTextBoxContainer)) {
+          canvas.remove(obj);
+        }
+      });
+
+      const img = await fabric.FabricImage.fromURL(f.target?.result as string);
+      const scale = Math.min(canvas.width! / img.width!, canvas.height! / img.height!);
+      img.scale(scale < 1 ? scale : 1);
+      img.set({ left: canvas.width! / 2, top: canvas.height! / 2, originX: 'center', originY: 'center' });
+      canvas.backgroundImage = img;
+      
+      undoStack.current = [];
+      redoStack.current = [];
+
+      const propertyTitle = new fabric.IText('【ここに物件名を入力】', {
+        fontSize: 14,
+        fontWeight: '500',
+        fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
+        fill: '#1f2937', 
+        backgroundColor: 'rgba(255, 255, 255, 0.9)', 
+        padding: 6,
+        originX: 'right', 
+        originY: 'bottom', 
+        left: canvas.width! - 20, 
+        top: canvas.height! - 20, 
+        hasControls: false, 
+        hasBorders: true,
+        borderColor: '#3b82f6', 
+        cornerSize: 0,
+        lockMovementX: false, 
+        lockMovementY: false,
+      });
+
+      (propertyTitle as any)._isPropertyTitle = true;
+
+      propertyTitle.onKeyDown = (eEvent: KeyboardEvent) => {
+        if (eEvent.key === 'Enter') {
+          if (eEvent.shiftKey) {
+            (propertyTitle as any).insertChars('\n');
+            propertyTitle.canvas?.requestRenderAll();
+            return;
+          } else {
+            eEvent.preventDefault();
+            propertyTitle.exitEditing(); 
+            return;
+          }
+        }
+        fabric.IText.prototype.onKeyDown.call(propertyTitle, eEvent);
+      };
+
+      canvas.getObjects().forEach((obj) => {
+        if ((obj as any)._parentGroup) return;
+        canvas.bringObjectToFront(obj);
+        obj.selectable = true;
+        obj.evented = true;
+      });
+
+      canvas.add(propertyTitle);
+
+      canvas.getObjects().forEach((obj: any) => {
+        if (obj.type === 'group' && obj._dimensionParts) {
+          updateCombinedTextPosition(obj, obj._dimensionParts);
+        }
+      });
+
+      saveHistory(canvas);
+      
+      canvas.discardActiveObject();
+      canvas.setActiveObject(propertyTitle);
+      canvas.renderAll();
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="flex flex-col items-center gap-4 p-8 bg-gray-50 min-h-screen font-sans">
       <div className="flex flex-wrap gap-4 mb-4 items-center bg-white p-4 rounded-xl shadow-md border border-gray-100">
@@ -1328,8 +1354,7 @@ const FloorPlanEditor = () => {
           <button onClick={() => rotateSelected(90)} className="p-2 hover:bg-white rounded-md transition shadow-sm" title="右90度回転">↻</button>
         </div>
 
-        {/* ★新機能：個別背景ハイライトオンオフ切り替えボタン */}
-        {/* すでに背景があるオブジェクトを選択している時は青くアクティブ化（bg-blue-600）し、文字も変更します */}
+        {/* ★個別背景ハイライトオンオフ切り替えボタン */}
         <button
           onClick={toggleSelectedObjectsHighlight}
           className={`px-4 py-2 rounded-lg transition font-medium shadow-sm text-sm border ${
