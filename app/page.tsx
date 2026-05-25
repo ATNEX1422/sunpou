@@ -41,7 +41,7 @@ export default function App() {
     '_customTopOffset',
     '_isTextBoxContainer', // ハイライト座布団判定
     '_targetGroupId',      // ハイライト連動グループID
-    '_isPropertyTitle',    // ★追加：物件名テキストボックスの判定キー（これでシリアライズ消失バグを解決）
+    '_isPropertyTitle',    // 物件名テキストボックスの判定キー（これでシリアライズ消失バグを解決）
     'selectable',
     'evented',
     'lockMovementX',
@@ -68,9 +68,10 @@ export default function App() {
     let offsetX = 0;
     let offsetY = 0;
 
+    // ★修正：WおよびW_Hモードのテキスト初期位置を寸法線の下側（+24）から上側（-24）に変更
     if (currentDimMode === 'W' || currentDimMode === 'W_H') {
       offsetX = 0;
-      offsetY = (target.height / 2) + 24; 
+      offsetY = -((target.height / 2) + 24); 
     } else {
       offsetX = (target.width / 2) + 12;
       offsetY = -((target.height / 2) + 12);
