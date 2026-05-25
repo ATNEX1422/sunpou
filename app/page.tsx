@@ -68,13 +68,21 @@ export default function App() {
     let offsetX = 0;
     let offsetY = 0;
 
-    // ★修正：WおよびW_Hモードのテキスト初期位置を寸法線の下側（+24）から上側（-24）に変更
+    // ★クリアランス改善：寸法線が極端に縮小された際、矢印（Triangle）とテキストが重なるのを物理的に防ぐための最小オフセット設定（中心からの最小距離）
+    const minCenterOffsetW = 32; // W、W_Hモード時の上方向への最小オフセット距離
+    const minCenterOffsetX = 45; // W_D、W_D_Hなどの十字モード時の右方向への最小オフセット距離
+    const minCenterOffsetY = 45; // W_D、W_D_Hなどの十字モード時の上方向への最小オフセット距離
+
     if (currentDimMode === 'W' || currentDimMode === 'W_H') {
       offsetX = 0;
-      offsetY = -((target.height / 2) + 24); 
+      const calculatedOffsetY = (target.height / 2) + 24;
+      offsetY = -Math.max(calculatedOffsetY, minCenterOffsetW); 
     } else {
-      offsetX = (target.width / 2) + 12;
-      offsetY = -((target.height / 2) + 12);
+      // 十字や複数軸モード（W_D, W_D_Hなど）の時、矢印の先端（target.width / 2）からさらに外側へ離すパディング
+      const paddingFromArrow = 16;
+      
+      offsetX = Math.max((target.width / 2) + paddingFromArrow, minCenterOffsetX);
+      offsetY = -Math.max((target.height / 2) + paddingFromArrow, minCenterOffsetY);
     }
 
     const rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
