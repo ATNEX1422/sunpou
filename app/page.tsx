@@ -81,7 +81,7 @@ export default function App() {
       
       // 左右の頂点は前回の美しさを維持 (長半径 a = baseDistance + 20, 最低 28)
       const a = Math.max(baseDistance + 20, 28);
-      // ★修正：上下の軌道 $b$ を少し離してゆとりを持たせました (短半径 b = 6 -> 12, 最低値を 12 -> 18 に調整)
+      // 上下の軌道を少し離してゆとりを持たせる (短半径 b = baseDistance + 12, 最低値を 12 -> 18 に調整)
       const b = Math.max(baseDistance + 12, 18); 
 
       // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
@@ -1357,6 +1357,9 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !canvas) return;
 
+    // ★ファイル名から拡張子を削除（例: "A棟201号室.jpeg" ➔ "A棟201号室"）
+    const fileNameWithNoExtension = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+
     const fabricObj = (window as any).fabric;
     const reader = new FileReader();
     reader.onload = async (f) => {
@@ -1375,7 +1378,10 @@ export default function App() {
       undoStack.current = [];
       redoStack.current = [];
 
-      const propertyTitle = new fabricObj.IText('【ここに物件名を入力】', {
+      // ★ファイル名があればそれを使い、なければフォールバック用のプレースホルダーを適用
+      const initialTitle = fileNameWithNoExtension || '【ここに物件名を入力】';
+
+      const propertyTitle = new fabricObj.IText(initialTitle, {
         fontSize: 14,
         fontWeight: '500',
         fontFamily: 'Inter, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
