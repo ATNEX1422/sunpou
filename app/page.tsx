@@ -89,15 +89,20 @@ export default function App() {
       rotatedX = target.left! + dx;
       rotatedY = target.top! + dy;
     } else if (currentDimMode === 'W_H') {
-      // ★W_Hモード：楕円軌道にせず、ご要望通り「元の円形軌道」をベースにしつつ、上下をほんの少し近づける
-      let offsetX = 0;
-      // 24px から 16px に変更して、ほんの少し寸法線に近接させる
-      const calculatedOffsetY = (target.height / 2) + 16;
-      // 最小クリアランスも 24px に下げて接近しやすくする
-      let offsetY = -Math.max(calculatedOffsetY, 24); 
+      // ★W_Hモード：楕円軌道にし、上下は近づけたまま、左右の頂点（クリアランス）をしっかり離す
+      const baseDistance = (target.height / 2);
+      
+      // 左右の頂点（テキストが左右に来る時）は離して視認性を確保 (長半径 a = baseDistance + 36, 最小 40)
+      const a = Math.max(baseDistance + 36, 40);
+      // 上下の軌道（テキストが上下に来る時）は前回の接近した距離を完全に維持 (短半径 b = baseDistance + 16, 最小 24)
+      const b = Math.max(baseDistance + 16, 24); 
 
-      rotatedX = target.left! + (offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad));
-      rotatedY = target.top! + (offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad));
+      // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
+      const dx = a * Math.sin(angleRad);
+      const dy = -b * Math.cos(angleRad);
+
+      rotatedX = target.left! + dx;
+      rotatedY = target.top! + dy;
     } else {
       // 十字や複数軸モード（W_D, W_D_Hなど）の時、矢印の先端（target.width / 2）からさらに外側へ離すパディング
       const paddingFromArrow = 16;
