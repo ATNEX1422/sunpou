@@ -64,23 +64,25 @@ export default function App() {
     const angleRad = (target.angle || 0) * (Math.PI / 180);
     const currentDimMode = (target as any)._dimMode || 'W';
 
-    // 寸法線の形状に合わせて初期配置 of 基準点を決める
+    // 寸法線の形状に合わせて初期配置の基準点を決める
     let rotatedX = target.left!;
     let rotatedY = target.top!;
 
     // クリアランス設定：寸法線が極端に縮小された際、矢印（Triangle）とテキストが重なるのを物理的に防ぐための最小オフセット設定（中心からの最小距離）
-    const minCenterOffsetW = 32; // Wモード時の上方向への最小オフセット距離
+    const minCenterOffsetW = 32; // W、W_Hモード時の上方向への最小オフセット距離
+    
+    // 十字縮小時の中央矢印とテキストのキープ距離
     const minCenterOffsetX = 45; // 十字モード時の右方向への最小オフセット距離
     const minCenterOffsetY = 45; // 十字モード時の上方向への最小オフセット距離
 
     if (currentDimMode === 'W') {
-      // ★Wモード：ご要望の「横長楕円軌道」を適用（左右はそのまま離し、上下は近くに寄せる）
+      // ★Wモード：横長楕円軌道（左右はそのまま離し、上下は近くに寄せる）
       const baseDistance = (target.height / 2);
       
-      // 左右の頂点はそのまま (長半径 a = 元の計算と同じ)
-      const a = Math.max(baseDistance + 24, minCenterOffsetW);
-      // 上下の軌道を短くして横長楕円に (短半径 b = 近くに配置)
-      const b = Math.max(baseDistance + 10, 16); 
+      // 左右の頂点を少し近づける (20px, 最低 28px)
+      const a = Math.max(baseDistance + 20, 28);
+      // 上下の軌道を短くして横長楕円に (6px, 最低 12px)
+      const b = Math.max(baseDistance + 6, 12); 
 
       // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
       const dx = a * Math.sin(angleRad);
@@ -89,13 +91,13 @@ export default function App() {
       rotatedX = target.left! + dx;
       rotatedY = target.top! + dy;
     } else if (currentDimMode === 'W_H') {
-      // ★W_Hモード：楕円軌道にし、上下は近づけたまま、左右の頂点（クリアランス）をしっかり離す
+      // ★W_Hモード：左右のクリアランスは維持しつつ、上下だけを程よく離す
       const baseDistance = (target.height / 2);
       
-      // 左右の頂点（テキストが左右に来る時）は離して視認性を確保 (長半径 a = baseDistance + 36, 最小 40)
-      const a = Math.max(baseDistance + 36, 40);
-      // 上下の軌道（テキストが上下に来る時）は前回の接近した距離を完全に維持 (短半径 b = baseDistance + 16, 最小 24)
-      const b = Math.max(baseDistance + 16, 24); 
+      // 左右の頂点（テキストが左右に来る時）は前回そのままのクリアランスを維持 (長半径 a = baseDistance + 28, 最小 34)
+      const a = Math.max(baseDistance + 28, 34);
+      // 上下の軌道（テキストが上下に来る時）は少し離してゆとりを持たせる (短半径 b = baseDistance + 18, 最小 24 に微調整)
+      const b = Math.max(baseDistance + 18, 24); 
 
       // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
       const dx = a * Math.sin(angleRad);
@@ -278,7 +280,7 @@ export default function App() {
       setIsPlacing(false);
       canvas.defaultCursor = 'default';
 
-      // 既存オブジェクトの選択可能状態を復元（ただし座布団ボックスなどの裏方パーツは除外）
+      // 既存オブジェクト of 選択可能状態を復元（ただし座布団ボックスなどの裏方パーツは除外）
       canvas.getObjects().forEach((obj: any) => {
         if (!(obj as any)._parentGroup && !(obj as any)._isTextBoxContainer) {
           obj.selectable = true;
