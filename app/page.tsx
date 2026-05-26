@@ -999,7 +999,7 @@ export default function App() {
       lockScalingX: false, 
       lockScalingY: false, 
       lockRotation: false,
-      backgroundColor: 'transparent' // 共通Rect座布団で包み込むためテキスト本来の背景は透明化
+      backgroundColor: 'transparent' // 共通Rect座布団で包み込むためテキスト本来 of 背景は透明化
     };
 
     const labelStyle = { ...baseStyle, selectable: false, evented: false, hasControls: false, hasBorders: false };
