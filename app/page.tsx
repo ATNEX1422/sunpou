@@ -76,13 +76,13 @@ export default function App() {
     const minCenterOffsetY = 45; // 十字モード時の上方向への最小オフセット距離
 
     if (currentDimMode === 'W') {
-      // ★Wモード：横長楕円軌道（左右はそのまま離し、上下は近くに寄せる）
+      // ★Wモード：横長楕円軌道（左右はそのまま離し、上下は程よいバランスの距離感に少し離す）
       const baseDistance = (target.height / 2);
       
-      // 左右の頂点を少し近づける (20px, 最低 28px)
+      // 左右の頂点は前回の美しさを維持 (長半径 a = baseDistance + 20, 最低 28)
       const a = Math.max(baseDistance + 20, 28);
-      // 上下の軌道を短くして横長楕円に (6px, 最低 12px)
-      const b = Math.max(baseDistance + 6, 12); 
+      // ★修正：上下の軌道 $b$ を少し離してゆとりを持たせました (短半径 b = 6 -> 12, 最低値を 12 -> 18 に調整)
+      const b = Math.max(baseDistance + 12, 18); 
 
       // 楕円方程式に基づき、回転角度に対する滑らかな軌道座標を算出
       const dx = a * Math.sin(angleRad);
@@ -173,7 +173,7 @@ export default function App() {
       currentLineIndex++;
     }
 
-    // --- グループ固有の角丸背景座布団（Rect）のサイズ・位置・重ね順の厳密な同期 ---
+    // --- グループ固有 of 角丸背景座布団（Rect）のサイズ・位置・重ね順の厳密な同期 ---
     if (target.canvas && (target as any).id) {
       const bgRect = target.canvas.getObjects().find(
         (obj: any) => obj._isTextBoxContainer && obj._targetGroupId === (target as any).id
