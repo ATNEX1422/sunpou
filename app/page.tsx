@@ -26,7 +26,7 @@ const TEXT_BASE_STYLE = {
 const SERIALIZE_PROPERTIES = [
   '_dimMode', '_dimensionParts', '_parentGroup', '_isNewLine', '_customTopOffset',
   '_isTextBoxContainer', '_targetGroupId', '_isPropertyTitle',
-  '_colorCoded', '_axisColors', '_axisLabel',
+  '_colorCoded', '_axisColors', '_axisLabel', '_arrowFlipped',
   'selectable', 'evented',
   'lockMovementX', 'lockMovementY', 'lockScalingX', 'lockScalingY', 'lockRotation', 'lockUniScaling',
   'hasControls', 'hasBorders', 'objectCaching', 'noScaleCache', 'id',
@@ -48,21 +48,28 @@ const applyAxisColors = (group: any, parts: any) => {
   if (!group || !parts) return;
   const colorCoded: boolean = !!group._colorCoded;
   const axisColors: Record<AxisKey, string> = { ...DEFAULT_AXIS_COLORS, ...(group._axisColors || {}) };
+  const flipped: boolean = !!group._arrowFlipped;
 
-  const wColor = colorCoded ? axisColors.W : axisColors.W;
-  const dColor = colorCoded ? axisColors.D : axisColors.W;
-  const hColor = colorCoded ? axisColors.H : axisColors.W;
+  // テキスト色は _axisColors がそのまま対応
+  const wTextColor = colorCoded ? axisColors.W : axisColors.W;
+  const dTextColor = colorCoded ? axisColors.D : axisColors.W;
+  const hTextColor = colorCoded ? axisColors.H : axisColors.W;
 
-  if (parts.wLine)   parts.wLine.set('stroke', wColor);
-  if (parts.wLeft)   parts.wLeft.set('fill', wColor);
-  if (parts.wRight)  parts.wRight.set('fill', wColor);
-  if (parts.dLine)   parts.dLine.set('stroke', dColor);
-  if (parts.dTop)    parts.dTop.set('fill', dColor);
-  if (parts.dBottom) parts.dBottom.set('fill', dColor);
+  // 矢印線色は flipped 時に W↔D を入れ替え
+  const wArrowColor = colorCoded ? (flipped ? axisColors.D : axisColors.W) : axisColors.W;
+  const dArrowColor = colorCoded ? (flipped ? axisColors.W : axisColors.D) : axisColors.W;
 
+  if (parts.wLine)   parts.wLine.set('stroke', wArrowColor);
+  if (parts.wLeft)   parts.wLeft.set('fill',   wArrowColor);
+  if (parts.wRight)  parts.wRight.set('fill',  wArrowColor);
+  if (parts.dLine)   parts.dLine.set('stroke', dArrowColor);
+  if (parts.dTop)    parts.dTop.set('fill',    dArrowColor);
+  if (parts.dBottom) parts.dBottom.set('fill', dArrowColor);
+
+  // テキストは常に _axisLabel → テキスト色
   parts.textElements?.forEach((t: any) => {
     const label: AxisKey = t._axisLabel || 'W';
-    const colorMap: Record<AxisKey, string> = { W: wColor, D: dColor, H: hColor };
+    const colorMap: Record<AxisKey, string> = { W: wTextColor, D: dTextColor, H: hTextColor };
     t.set('fill', colorMap[label]);
   });
 };
@@ -369,6 +376,25 @@ export default function App() {
     g._axisColors[axis] = newColor;
     applyAxisColors(g, g._dimensionParts);
     setColorPanel(prev => ({ ...prev, axisColors: { ...prev.axisColors, [axis]: newColor } }));
+    saveHistory(canvas);
+    canvas.requestRenderAll();
+  };
+
+  // ── 軸ラベル入れ替え ─────────────────────────────────────────────────────
+  // 寸法線の矢印形状はそのままに、どの矢印にどの軸ラベル（W/D/H）と数値・色が
+  // 対応するかだけを入れ替える。横矢印←→縦矢印の対応を逆にしたい時に使う。
+
+  // W↔D 矢印線の色対応を反転する（テキスト色・_axisColors は不変）
+  const swapAxes = (_axisA: AxisKey, _axisB: AxisKey) => {
+    if (!canvas) return;
+    const g = resolveGroup(canvas.getActiveObject() as any);
+    if (!g || g.type !== 'group' || !g._dimensionParts) return;
+
+    saveHistory(canvas);
+    g._arrowFlipped = !g._arrowFlipped;
+    applyAxisColors(g, g._dimensionParts);
+    // パネルはテキスト色(_axisColors)を表示するため syncColorPanel はそのまま
+    syncColorPanel(g);
     saveHistory(canvas);
     canvas.requestRenderAll();
   };
@@ -1101,6 +1127,31 @@ export default function App() {
           <span className="text-xs text-gray-400">
             {colorPanel.colorCoded ? '各軸を個別の色で表示' : '「単色」パレットで全体色を変更できます'}
           </span>
+
+          {/* 軸入れ替えボタン（複数軸モード時のみ表示） */}
+          {(hasDAxis || hasHAxis) && (
+            <div className="flex items-center gap-1.5 ml-auto">
+              <span className="text-xs text-gray-400">入替</span>
+              {hasDAxis && (
+                <button onClick={() => swapAxes('W', 'D')}
+                  className="px-2 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition"
+                  title="横矢印(W)と縦矢印(D)のラベル・数値・色を入れ替えます"
+                >W↔D</button>
+              )}
+              {hasHAxis && hasDAxis && (
+                <button onClick={() => swapAxes('D', 'H')}
+                  className="px-2 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition"
+                  title="D と H のラベル・数値・色を入れ替えます"
+                >D↔H</button>
+              )}
+              {hasHAxis && (
+                <button onClick={() => swapAxes('W', 'H')}
+                  className="px-2 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition"
+                  title="横矢印(W)と H のラベル・数値・色を入れ替えます"
+                >W↔H</button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
