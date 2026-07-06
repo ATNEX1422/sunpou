@@ -558,7 +558,7 @@ export default function App() {
             fCanvas.setActiveObject(next); next.enterEditing(); next.selectAll(); fCanvas.requestRenderAll();
           }, 50);
         } else {
-          parts.textElements.forEach((t: any) => { if (t.evented) { t.selectable = true; } });
+          parts.textElements.forEach((t: any) => { if (t._axisLabel) { t.evented = true; t.selectable = true; } });
           group.setCoords(); fCanvas.setActiveObject(group); fCanvas.requestRenderAll();
         }
       });
@@ -725,7 +725,7 @@ export default function App() {
       if (next) {
         setTimeout(() => { next.selectable = true; next.evented = true; fCanvas.setActiveObject(next); next.enterEditing(); next.selectAll(); fCanvas.requestRenderAll(); }, 50);
       } else {
-        parts.textElements.forEach((t: any) => { if (t.evented) t.selectable = true; });
+        parts.textElements.forEach((t: any) => { if (t._axisLabel) { t.evented = true; t.selectable = true; } });
         group.setCoords(); fCanvas.setActiveObject(group); fCanvas.requestRenderAll();
       }
     });
