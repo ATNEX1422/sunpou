@@ -1003,11 +1003,6 @@ export default function App() {
                                   'text-gray-500 hover:text-gray-900'
     }`;
 
-  const colorInputCls = (disabled: boolean) =>
-    `w-8 h-7 rounded border border-gray-300 cursor-pointer p-0.5 transition ${
-      disabled ? 'opacity-30 cursor-not-allowed' : 'hover:border-gray-400'
-    }`;
-
   if (!fabricLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50 font-sans">
@@ -1075,38 +1070,38 @@ export default function App() {
           </button>
         </div>
 
-        {/* 軸別色分けパネル（寸法線グループ選択時のみ・ヘッダー内に収める） */}
-        {showColorPanel && (
-          <div className="flex flex-wrap items-center gap-3 bg-white px-3 py-2 rounded-xl shadow-sm border border-gray-100">
-            <button onClick={toggleColorCoded}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium border transition ${
-                colorPanel.colorCoded ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700'
-                                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-              }`}
-            >
-              🎨 色分け{colorPanel.colorCoded ? 'ON' : 'OFF'}
-            </button>
+        {/* 軸別色分けパネル（常時レンダリング・非選択時は invisible で高さを保持しレイアウトを固定） */}
+        <div className={`flex flex-wrap items-center gap-3 bg-white px-3 py-2 rounded-xl shadow-sm border border-gray-100 ${showColorPanel ? 'visible' : 'invisible'}`}>
+          <button onClick={toggleColorCoded}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium border transition ${
+              colorPanel.colorCoded ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            🎨 色分け{colorPanel.colorCoded ? 'ON' : 'OFF'}
+          </button>
 
-            <div className="h-5 w-px bg-gray-200" />
+          <div className="h-5 w-px bg-gray-200" />
 
-            {(['W', ...(hasDAxis ? ['D'] : []), ...(hasHAxis ? ['H'] : [])] as AxisKey[]).map(axis => (
-              <label key={axis} className="flex items-center gap-1.5 cursor-pointer">
-                <span className="w-2.5 h-2.5 rounded-full border border-gray-300" style={{ backgroundColor: colorPanel.axisColors[axis] }} />
-                <span className="text-sm font-medium text-gray-600">{axis}</span>
-                <input type="color" value={colorPanel.axisColors[axis]}
-                  onChange={ev => handleAxisColorChange(axis, ev.target.value)}
-                  disabled={!colorPanel.colorCoded}
-                  className={colorInputCls(!colorPanel.colorCoded)}
-                  title={`${axis}軸の色`}
+          {(['W', ...(hasDAxis ? ['D'] : []), ...(hasHAxis ? ['H'] : [])] as AxisKey[]).map(axis => (
+            <div key={axis} className="flex items-center gap-1.5">
+              <span className="text-sm font-medium text-gray-600 w-4">{axis}</span>
+              {(['#ef4444','#3b82f6','#22c55e','#000000'] as const).map(c => (
+                <button key={c} onClick={() => colorPanel.colorCoded && handleAxisColorChange(axis, c)}
+                  className={`w-6 h-6 rounded-md border-2 transition hover:scale-110 ${
+                    colorPanel.axisColors[axis] === c ? 'border-gray-700 scale-110' : 'border-transparent'
+                  } ${!colorPanel.colorCoded ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                  style={{ backgroundColor: c }}
+                  title={`${axis}軸をこの色に`}
                 />
-              </label>
-            ))}
+              ))}
+            </div>
+          ))}
 
-            <span className="text-xs text-gray-400">
-              {colorPanel.colorCoded ? '各軸を個別の色で表示' : '「単色」パレットで全体色を変更できます'}
-            </span>
-          </div>
-        )}
+          <span className="text-xs text-gray-400">
+            {colorPanel.colorCoded ? '各軸を個別の色で表示' : '「単色」パレットで全体色を変更できます'}
+          </span>
+        </div>
       </div>
 
       {/* キャンバスエリア（残りの高さをすべて使い、内側のみスクロール） */}
